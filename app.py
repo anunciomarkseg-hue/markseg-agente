@@ -1,17 +1,19 @@
 """
 Agente de Documentos MarkSeg
-Interface conversacional — descreva, gere, baixe.
+Upload de arquivos + texto → PDF no padrão da agência.
 """
 
 import streamlit as st
-import os, sys, tempfile
+import os, sys, tempfile, json
+import pandas as pd
 from datetime import date
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-# ── Config ────────────────────────────────────────────────────────────────
+LOGO_PATH = os.path.join(ROOT, "brand", "logo.png")
+
 st.set_page_config(
     page_title="Agente de Documentos MarkSeg",
     page_icon="🛡️",
@@ -19,327 +21,173 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-LOGO_PATH = os.path.join(ROOT, "brand", "logo.png")
-
-# ── CSS ───────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-body, .stApp { background: #F5F6FA; }
-
-.header {
-    background: #1B3A6B;
-    border-radius: 12px;
-    padding: 24px 32px;
-    display: flex;
-    align-items: center;
-    gap: 20px;
-    margin-bottom: 28px;
-}
-.header h1 {
-    color: white;
-    font-size: 1.6rem;
-    margin: 0;
-    font-weight: 800;
-}
-.header p {
-    color: #aab4cc;
-    margin: 4px 0 0 0;
-    font-size: 0.9rem;
-}
-
-.doc-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    gap: 12px;
-    margin: 16px 0 24px 0;
-}
-.doc-card {
-    background: white;
-    border: 2px solid #E0E3EE;
-    border-radius: 10px;
-    padding: 16px 12px;
-    text-align: center;
-    cursor: pointer;
-    transition: all 0.15s;
-}
-.doc-card:hover, .doc-card.selected {
-    border-color: #F5821E;
-    box-shadow: 0 2px 12px rgba(245,130,30,0.15);
-}
-.doc-card .icon { font-size: 1.8rem; }
-.doc-card .name {
-    font-size: 0.78rem;
-    font-weight: 700;
-    color: #1B3A6B;
-    margin-top: 8px;
-    line-height: 1.3;
-}
-
-.input-box {
-    background: white;
-    border-radius: 12px;
-    padding: 20px 24px;
-    border: 1px solid #E0E3EE;
-    margin-bottom: 16px;
-}
-.input-box h3 {
-    color: #1B3A6B;
-    font-size: 0.95rem;
-    font-weight: 700;
-    margin: 0 0 12px 0;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-}
-
-.tip-box {
-    background: #EEF2FF;
-    border-left: 3px solid #F5821E;
-    border-radius: 0 8px 8px 0;
-    padding: 10px 14px;
-    font-size: 0.82rem;
-    color: #444;
-    margin-bottom: 16px;
-}
-
+.stApp { background: #F5F6FA; }
+h1 { color: #1B3A6B !important; font-weight: 800 !important; }
+.block { background: white; border-radius: 12px; padding: 20px 24px;
+         border: 1px solid #E0E3EE; margin-bottom: 16px; }
+.sec-title { background: #1B3A6B; color: white; border-radius: 8px;
+             padding: 8px 14px; font-weight: 700; font-size: 0.82rem;
+             letter-spacing: 0.05em; margin: 20px 0 10px 0; }
+.tip { background: #FFF8F2; border-left: 3px solid #F5821E;
+       border-radius: 0 8px 8px 0; padding: 10px 14px;
+       font-size: 0.82rem; color: #555; margin-bottom: 16px; }
 .stButton > button {
-    background: #F5821E !important;
-    color: white !important;
-    border: none !important;
-    font-weight: 700 !important;
-    font-size: 1rem !important;
-    padding: 0.65rem 2.5rem !important;
-    border-radius: 8px !important;
-    width: 100%;
+    background: #F5821E !important; color: white !important;
+    border: none !important; font-weight: 700 !important;
+    font-size: 1rem !important; padding: 0.65rem 2rem !important;
+    border-radius: 8px !important; width: 100%;
 }
-.stButton > button:hover {
-    background: #D4691A !important;
-}
-
-.result-box {
-    background: #1B3A6B;
-    border-radius: 12px;
-    padding: 20px 24px;
-    text-align: center;
-    margin-top: 20px;
-}
-.result-box h3 { color: #F5821E; margin: 0 0 6px 0; }
-.result-box p  { color: #aab4cc; margin: 0; font-size: 0.85rem; }
-
-.stTextArea textarea {
-    border-radius: 8px !important;
-    border: 1.5px solid #E0E3EE !important;
-    font-size: 0.95rem !important;
-    min-height: 140px !important;
-}
-.stTextArea textarea:focus {
-    border-color: #F5821E !important;
-    box-shadow: 0 0 0 2px rgba(245,130,30,0.15) !important;
+.stButton > button:hover { background: #D4691A !important; }
+div[data-testid="stFileUploader"] {
+    border: 2px dashed #E0E3EE !important;
+    border-radius: 10px !important; padding: 8px !important;
 }
 </style>
 """, unsafe_allow_html=True)
 
 # ── Header ────────────────────────────────────────────────────────────────
-col_logo, col_title = st.columns([1, 4])
-with col_logo:
+c1, c2 = st.columns([1, 5])
+with c1:
     if os.path.exists(LOGO_PATH):
-        st.image(LOGO_PATH, width=120)
-with col_title:
-    st.markdown("""
-    <div style="padding-top:8px">
-        <h1 style="color:#1B3A6B;font-size:1.7rem;margin:0;font-weight:800">
-            Agente de Documentos
-        </h1>
-        <p style="color:#888;margin:2px 0 0 0;font-size:0.9rem">
-            MarkSeg · Descreva · Gere · Baixe
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+        st.image(LOGO_PATH, width=110)
+with c2:
+    st.markdown("## Agente de Documentos MarkSeg")
+    st.caption("Suba os arquivos ou descreva os dados · gere o PDF no padrão da agência")
 
 st.divider()
 
-# ── Seleção de tipo ───────────────────────────────────────────────────────
+# ── Tipo de documento ─────────────────────────────────────────────────────
 TIPOS = {
-    "relatorio_performance":    ("📊", "Relatório\nde Performance"),
-    "relatorio_social":         ("📱", "Relatório\nMídias Sociais"),
-    "plano_de_midia":           ("🗺️",  "Plano de\nMídia"),
-    "apresentacao_resultado":   ("📈", "Apresentação\nde Resultado"),
-    "proposta_comercial":       ("💼", "Proposta\nComercial"),
+    "📊  Relatório de Performance (Meta + Google)": "relatorio_performance",
+    "📱  Relatório de Mídias Sociais":               "relatorio_social",
+    "🗺️   Plano de Mídia":                            "plano_de_midia",
+    "📈  Apresentação de Resultado Mensal":           "apresentacao_resultado",
+    "💼  Proposta Comercial":                         "proposta_comercial",
 }
 
-if "tipo_sel" not in st.session_state:
-    st.session_state.tipo_sel = "relatorio_performance"
+tipo_label = st.selectbox("**Tipo de documento**", list(TIPOS.keys()))
+tipo = TIPOS[tipo_label]
 
-st.markdown("**Qual documento você quer gerar?**")
+# ── Dados básicos ─────────────────────────────────────────────────────────
+st.markdown('<div class="sec-title">DADOS DO DOCUMENTO</div>', unsafe_allow_html=True)
+c1, c2, c3 = st.columns(3)
+cliente     = c1.text_input("Cliente", placeholder="Ex: Faturei Hoje")
+periodo     = c2.text_input("Período", placeholder="Ex: 13–19 Mai 2026")
+responsavel = c3.text_input("Responsável", value="Rafael")
 
-cols = st.columns(len(TIPOS))
-for col, (key, (icon, nome)) in zip(cols, TIPOS.items()):
-    with col:
-        selecionado = st.session_state.tipo_sel == key
-        border = "#F5821E" if selecionado else "#E0E3EE"
-        bg     = "#FFF8F2" if selecionado else "white"
-        st.markdown(f"""
-        <div style="background:{bg};border:2px solid {border};border-radius:10px;
-                    padding:14px 8px;text-align:center;cursor:pointer">
-            <div style="font-size:1.6rem">{icon}</div>
-            <div style="font-size:0.75rem;font-weight:700;color:#1B3A6B;
-                        margin-top:6px;line-height:1.3">{nome}</div>
-        </div>
-        """, unsafe_allow_html=True)
-        if st.button("Selecionar", key=f"btn_{key}",
-                     use_container_width=True,
-                     type="primary" if selecionado else "secondary"):
-            st.session_state.tipo_sel = key
-            st.rerun()
+# ── Upload de arquivos ────────────────────────────────────────────────────
+st.markdown('<div class="sec-title">ARQUIVOS COM OS DADOS</div>', unsafe_allow_html=True)
+st.markdown('<div class="tip">Suba os relatórios exportados das plataformas (Meta Ads, Google Ads, planilhas). Pode subir vários arquivos de uma vez.</div>', unsafe_allow_html=True)
 
-tipo_atual = st.session_state.tipo_sel
-icon_atual, nome_atual = TIPOS[tipo_atual]
-
-st.divider()
-
-# ── Dica contextual ───────────────────────────────────────────────────────
-DICAS = {
-    "relatorio_performance": (
-        "Fale os números da semana: cliente, período, quanto investiu no Meta e Google, "
-        "quantos leads gerou, qual o CPL, quais criativos rodaram e qual foi o melhor. "
-        "Pode colar os dados brutos — o agente interpreta tudo."
-    ),
-    "relatorio_social": (
-        "Informe: cliente, período, seguidores novos, alcance, engajamento, "
-        "quais posts foram publicados, qual teve melhor resultado e o que planeja para a próxima semana."
-    ),
-    "plano_de_midia": (
-        "Descreva: cliente, investimento mensal, quais canais usar (Google/Meta), "
-        "qual o produto principal, período do plano e as metas esperadas."
-    ),
-    "apresentacao_resultado": (
-        "Informe o mês, os resultados gerais (investimento, leads, CPL, ROAS), "
-        "o que bateu meta, o que não bateu, e o que vai mudar no próximo mês."
-    ),
-    "proposta_comercial": (
-        "Descreva o cliente, o diagnóstico do cenário atual, quais serviços vai oferecer, "
-        "valores de gestão e mídia, e os resultados que pretende entregar."
-    ),
-}
-
-st.markdown(f"""
-<div class="tip-box">
-    <b>{icon_atual} {nome_atual.replace(chr(10), ' ')}</b> — {DICAS[tipo_atual]}
-</div>
-""", unsafe_allow_html=True)
-
-# ── Entrada de dados ──────────────────────────────────────────────────────
-st.markdown("**Descreva os dados do documento:**")
-
-descricao = st.text_area(
-    label="descricao",
+arquivos = st.file_uploader(
+    "Arraste os arquivos aqui",
+    type=["csv", "xlsx", "xls", "pdf", "txt"],
+    accept_multiple_files=True,
     label_visibility="collapsed",
-    placeholder=(
-        "Ex: Relatório da semana de 13 a 19 de maio do cliente Faturei Hoje. "
-        "Investimos R$ 563 no Meta e R$ 29 no Google. Geramos 51 leads a R$ 4,79 de CPL. "
-        "O criativo video15 foi o vencedor com 37 leads a R$ 3,39..."
-    ),
-    height=180,
-    key="descricao_input",
 )
 
-# upload de arquivo opcional
-with st.expander("📎 Anexar planilha ou CSV com dados (opcional)"):
-    arquivo = st.file_uploader("Arraste o arquivo", type=["csv", "xlsx", "txt"],
-                                label_visibility="collapsed")
-    if arquivo:
-        import pandas as pd
+# preview dos arquivos
+dfs = {}
+textos_extras = []
+if arquivos:
+    for arq in arquivos:
         try:
-            if arquivo.name.endswith(".csv"):
-                df = pd.read_csv(arquivo, sep=None, engine="python")
-            else:
-                df = pd.read_excel(arquivo)
-            st.dataframe(df.head(10), use_container_width=True)
-            # adiciona resumo dos dados à descrição
-            extra = f"\n\nDADOS DO ARQUIVO ({arquivo.name}):\n{df.to_string(index=False, max_rows=50)}"
-            descricao = descricao + extra
+            if arq.name.endswith(".csv"):
+                df = pd.read_csv(arq, sep=None, engine="python", on_bad_lines="skip")
+                dfs[arq.name] = df
+                with st.expander(f"📄 {arq.name}", expanded=False):
+                    st.dataframe(df, use_container_width=True, height=200)
+            elif arq.name.endswith((".xlsx", ".xls")):
+                df = pd.read_excel(arq)
+                dfs[arq.name] = df
+                with st.expander(f"📄 {arq.name}", expanded=False):
+                    st.dataframe(df, use_container_width=True, height=200)
+            elif arq.name.endswith(".pdf"):
+                import pypdf
+                reader = pypdf.PdfReader(arq)
+                texto = "\n".join(p.extract_text() or "" for p in reader.pages)
+                textos_extras.append(f"[{arq.name}]\n{texto}")
+                with st.expander(f"📄 {arq.name}", expanded=False):
+                    st.text(texto[:1000] + ("..." if len(texto) > 1000 else ""))
+            elif arq.name.endswith(".txt"):
+                texto = arq.read().decode("utf-8", errors="ignore")
+                textos_extras.append(f"[{arq.name}]\n{texto}")
         except Exception as e:
-            st.warning(f"Não foi possível ler o arquivo: {e}")
+            st.warning(f"{arq.name}: {e}")
+
+# ── Campo de texto livre ──────────────────────────────────────────────────
+st.markdown('<div class="sec-title">INFORMAÇÕES ADICIONAIS</div>', unsafe_allow_html=True)
+st.markdown('<div class="tip">Adicione contexto, insights, recomendações, frases de resumo — qualquer dado que não esteja nos arquivos.</div>', unsafe_allow_html=True)
+
+texto_livre = st.text_area(
+    "Descreva aqui",
+    label_visibility="collapsed",
+    placeholder=(
+        "Ex: Criativo video15 foi o vencedor com CPL R$ 3,39. "
+        "Próximos passos: escalar budget em R$ 30/dia. "
+        "Frase resumo: 'Google capta, Meta reaquece.'"
+    ),
+    height=150,
+)
 
 st.markdown("")
 
-# ── Botão gerar ───────────────────────────────────────────────────────────
-gerar = st.button(f"⚡ Gerar {nome_atual.replace(chr(10), ' ')}",
-                   use_container_width=True)
+# ── Gerar ─────────────────────────────────────────────────────────────────
+gerar = st.button("⚡ Gerar PDF")
 
 if gerar:
-    if not descricao.strip():
-        st.error("Descreva os dados do documento antes de gerar.")
-    else:
-        # verifica API key
-        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-        if not api_key:
-            st.error("ANTHROPIC_API_KEY não configurada. "
-                     "Adicione nas configurações de Secrets do Streamlit Cloud.")
-            st.stop()
+    if not cliente:
+        st.error("Preencha o nome do cliente.")
+        st.stop()
 
-        with st.spinner("Interpretando os dados..."):
-            try:
-                from agent import extrair_dados
-                dados = extrair_dados(tipo_atual, descricao)
-            except Exception as e:
-                st.error(f"Erro ao interpretar dados: {e}")
-                st.stop()
+    with st.spinner("Processando arquivos e gerando PDF..."):
+        try:
+            from parsers import montar_dados
+            import importlib
 
-        with st.spinner("Gerando PDF no padrão MarkSeg..."):
-            try:
-                import importlib
-                mod = importlib.import_module(f"templates.{tipo_atual}")
+            dados = montar_dados(
+                tipo=tipo,
+                cliente=cliente,
+                periodo=periodo,
+                responsavel=responsavel,
+                dfs=dfs,
+                textos=textos_extras,
+                texto_livre=texto_livre,
+            )
 
-                with tempfile.NamedTemporaryFile(
-                    suffix=".pdf", delete=False,
-                    prefix=f"markseg_{tipo_atual}_"
-                ) as tmp:
-                    output = tmp.name
+            mod = importlib.import_module(f"templates.{tipo}")
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False,
+                                             prefix=f"markseg_{tipo}_") as tmp:
+                output = tmp.name
+            mod.gerar(dados, output)
 
-                mod.gerar(dados, output)
+            with open(output, "rb") as f:
+                pdf_bytes = f.read()
+            os.unlink(output)
 
-                with open(output, "rb") as f:
-                    pdf_bytes = f.read()
-                os.unlink(output)
+            nome_arquivo = (
+                f"MarkSeg_{tipo}_{cliente.replace(' ','_')}"
+                f"_{periodo.replace(' ','_')}.pdf"
+            )
 
-                cliente = dados.get("cliente", "cliente")
-                periodo = dados.get("periodo", date.today().strftime("%d%m%Y"))
-                nome_arquivo = (
-                    f"MarkSeg_{nome_atual.replace(chr(10),'_').replace(' ','_')}"
-                    f"_{cliente.replace(' ','_')}_{periodo.replace(' ','_')}.pdf"
-                )
+            st.success("PDF gerado com sucesso!")
+            st.download_button(
+                "⬇️ Baixar PDF",
+                data=pdf_bytes,
+                file_name=nome_arquivo,
+                mime="application/pdf",
+                use_container_width=True,
+            )
 
-                st.success("PDF gerado!")
-                st.markdown("""
-                <div class="result-box">
-                    <h3>Documento pronto</h3>
-                    <p>Clique no botão abaixo para baixar</p>
-                </div>
-                """, unsafe_allow_html=True)
+            with st.expander("🔍 Dados extraídos"):
+                st.json(dados)
 
-                st.download_button(
-                    label="⬇️ Baixar PDF",
-                    data=pdf_bytes,
-                    file_name=nome_arquivo,
-                    mime="application/pdf",
-                    use_container_width=True,
-                )
+        except Exception as e:
+            st.error(f"Erro: {e}")
+            import traceback
+            st.code(traceback.format_exc())
 
-                # mostra preview dos dados extraídos
-                with st.expander("🔍 Ver dados interpretados pelo agente"):
-                    import json
-                    st.json(dados)
-
-            except Exception as e:
-                st.error(f"Erro ao gerar PDF: {e}")
-                import traceback
-                st.code(traceback.format_exc())
-
-# ── Rodapé ────────────────────────────────────────────────────────────────
 st.markdown("---")
-st.markdown(
-    "<p style='text-align:center;color:#aaa;font-size:0.75rem'>"
-    "MarkSeg · Agente de Documentos · Todos os documentos no padrão da agência"
-    "</p>",
-    unsafe_allow_html=True
-)
+st.caption("MarkSeg · Agente de Documentos · Todos os documentos no padrão da agência")
