@@ -272,7 +272,7 @@ def chart_barras_horizontais(dados, largura_mm, altura_mm,
         th = 7 * mm
         d.add(String(4 * mm, altura_mm * mm - 5 * mm, titulo.upper(),
                      fontName="Helvetica-Bold", fontSize=8, fillColor=ORANGE))
-    n = len(dados)
+    n = len(dados) or 1
     area_h   = altura_mm * mm - th - 4 * mm
     bar_tot  = area_h / n
     bar_h    = bar_tot * 0.55
