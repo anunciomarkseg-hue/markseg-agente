@@ -116,6 +116,7 @@ TIPOS = {
     "🗺️   Plano de Mídia":                            "plano_de_midia",
     "📈  Apresentação de Resultado Mensal":           "apresentacao_resultado",
     "💼  Proposta Comercial":                         "proposta_comercial",
+    "🧭  Planejamento Estratégico":                   "planejamento_estrategico",
 }
 
 tipo_label = st.selectbox("**Tipo de documento**", list(TIPOS.keys()))

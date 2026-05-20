@@ -352,6 +352,21 @@ def montar_dados(tipo, cliente, periodo, responsavel,
             "frase_destaque": f"CPL médio R$ {cpl_geral:.2f} · resultado do mês.",
         })
 
+    # ── Planejamento Estratégico ──────────────────────────────────────────
+    elif tipo == "planejamento_estrategico":
+        dados.update({
+            "horizonte": periodo or "90 dias",
+            "diagnostico": linhas_livres,
+            "objetivos": [],
+            "pilares": [],
+            "cronograma": [],
+            "kpis": [],
+            "riscos": [],
+            "proximos_passos": [],
+            "frase_resumo":   dados.get("frase_resumo") or "Planejamento estruturado para crescimento sustentável.",
+            "frase_destaque": dados.get("frase_destaque") or "Estratégia clara · execução semana a semana.",
+        })
+
     # ── Proposta Comercial ────────────────────────────────────────────────
     elif tipo == "proposta_comercial":
         dados.update({
