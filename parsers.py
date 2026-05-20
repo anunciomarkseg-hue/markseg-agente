@@ -240,8 +240,8 @@ def parse_texto_completo(texto: str) -> list:
             i += 1
             continue
 
-        # ── Tabela: linha atual ou próxima tem separadores ──────────────
-        if tem_sep(i) or (tem_sep(i + 1) and limpa):
+        # ── Tabela: linha ATUAL tem separadores (tab ou 2+ pipes) ──────
+        if tem_sep(i):
             rows_raw = []
             while i < n and lx(i):
                 l = linhas[i]
@@ -252,7 +252,6 @@ def parse_texto_completo(texto: str) -> list:
                     row = [c.strip() for c in ll.strip("|").split("|")]
                 else:
                     break
-                # ignora linha separadora (só traços/dois pontos)
                 if not all(re.match(r"^[-:=]+$", c) for c in row if c):
                     rows_raw.append(row)
                 i += 1
@@ -264,6 +263,8 @@ def parse_texto_completo(texto: str) -> list:
                     "cabecalho": rows_norm[0] if rows_norm else [],
                     "linhas":    rows_norm[1:],
                 })
+            else:
+                i += 1  # garante progresso se nada foi parseado
             continue
 
         # ── Seção numerada: "1. TITULO" ──────────────────────────────────
@@ -357,6 +358,8 @@ def parse_texto_completo(texto: str) -> list:
         if txt_linhas:
             blocos.append({"tipo": "texto", "linhas": txt_linhas})
             primeiro_bloco = False
+        else:
+            i += 1  # garante progresso — evita loop infinito
         continue
 
     return blocos
