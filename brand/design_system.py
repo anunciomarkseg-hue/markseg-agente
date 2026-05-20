@@ -1,0 +1,508 @@
+"""
+MarkSeg Design System — base de todos os documentos da agência.
+Importar este módulo em qualquer template para garantir consistência visual.
+"""
+
+import os
+from reportlab.lib import colors
+from reportlab.lib.units import mm
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
+from reportlab.platypus import Flowable, Table, TableStyle, Paragraph, Spacer
+from reportlab.graphics.shapes import (
+    Drawing, Rect, String, Line, Circle, Wedge, Group, Polygon
+)
+
+# ── Dimensões ──────────────────────────────────────────────────────────────
+W, H = A4
+LOGO_PATH = os.path.join(os.path.dirname(__file__), "logo.png")
+
+# ── Paleta MarkSeg ─────────────────────────────────────────────────────────
+NAVY        = colors.HexColor("#1B3A6B")   # azul escuro principal
+BLUE        = colors.HexColor("#2980B9")   # azul médio
+ORANGE      = colors.HexColor("#F5821E")   # laranja MarkSeg
+ORANGE_DARK = colors.HexColor("#D4691A")   # laranja escuro (hover/destaque)
+GRAY_BG     = colors.HexColor("#F5F6FA")   # fundo de cards
+GRAY_LINE   = colors.HexColor("#E0E3EE")   # bordas/divisores
+GRAY_DARK   = colors.HexColor("#444444")   # texto secundário
+GRAY_LIGHT  = colors.HexColor("#888888")   # texto terciário
+WHITE       = colors.white
+GREEN       = colors.HexColor("#27AE60")
+RED         = colors.HexColor("#E74C3C")
+YELLOW      = colors.HexColor("#F39C12")
+
+# ── Tipografia ─────────────────────────────────────────────────────────────
+def style(name, font="Helvetica", size=10, color=None, align=TA_LEFT,
+          leading=None, before=0, after=0, bold=False):
+    if color is None:
+        color = NAVY
+    if bold:
+        font = font.replace("Helvetica", "Helvetica-Bold")
+    return ParagraphStyle(
+        name=name, fontName=font, fontSize=size, textColor=color,
+        alignment=align, leading=leading or round(size * 1.35),
+        spaceBefore=before, spaceAfter=after
+    )
+
+# Estilos prontos
+S = {
+    "h1":        style("h1",       size=24, bold=True),
+    "h2":        style("h2",       size=18, bold=True),
+    "h3":        style("h3",       size=13, bold=True),
+    "section":   style("section",  size=10, bold=True, color=WHITE),
+    "label":     style("label",    size=7,  color=GRAY_LIGHT),
+    "value_lg":  style("val_lg",   size=18, bold=True),
+    "value_md":  style("val_md",   size=14, bold=True),
+    "body":      style("body",     size=9,  color=GRAY_DARK, leading=14),
+    "body_bold": style("body_b",   size=9,  bold=True),
+    "th":        style("th",       size=8,  bold=True, color=WHITE),
+    "td":        style("td",       size=8,  color=GRAY_DARK),
+    "td_r":      style("td_r",     size=8,  color=GRAY_DARK, align=TA_RIGHT),
+    "td_bold":   style("td_bold",  size=8,  bold=True),
+    "td_green":  style("td_gr",    size=8,  bold=True, color=GREEN),
+    "td_red":    style("td_rd",    size=8,  bold=True, color=RED),
+    "td_orange": style("td_or",    size=8,  bold=True, color=ORANGE),
+    "caption":   style("caption",  size=7,  color=GRAY_LIGHT, align=TA_CENTER),
+    "insight":   style("insight",  size=9,  color=WHITE, leading=14),
+    "footer":    style("footer",   size=7,  color=GRAY_LIGHT, align=TA_CENTER),
+    "tag":       style("tag",      size=7,  bold=True, color=WHITE, align=TA_CENTER),
+}
+
+# ── Largura de conteúdo padrão ─────────────────────────────────────────────
+MARGIN = 20 * mm
+CW = W - 2 * MARGIN        # content width em pontos
+CW_MM = CW / mm            # em mm
+
+# ── Flowables ──────────────────────────────────────────────────────────────
+
+class PageHeader(Flowable):
+    """Faixa de cabeçalho interno de página."""
+    def __init__(self, cliente, subtitulo, pagina):
+        super().__init__()
+        self.cliente   = cliente
+        self.subtitulo = subtitulo
+        self.pagina    = pagina
+        self.width     = CW
+        self.height    = 14 * mm
+
+    def draw(self):
+        c = self.canv
+        c.setFillColor(NAVY)
+        c.rect(0, 0, self.width, self.height, fill=1, stroke=0)
+        c.setFillColor(WHITE)
+        c.setFont("Helvetica-Bold", 8)
+        c.drawString(4 * mm, 5.5 * mm, self.cliente.upper())
+        c.setFillColor(ORANGE)
+        c.setFont("Helvetica", 7)
+        c.drawString(4 * mm, 2 * mm, self.subtitulo.upper())
+        c.setFillColor(WHITE)
+        c.setFont("Helvetica", 7)
+        c.drawRightString(self.width - 4 * mm, 8 * mm, "MarkSeg · Agência de Tráfego")
+        c.setFont("Helvetica-Bold", 7)
+        c.drawRightString(self.width - 4 * mm, 2.5 * mm, self.pagina)
+
+
+class SectionHeader(Flowable):
+    """Cabeçalho de seção numerado com fundo laranja."""
+    def __init__(self, numero, titulo, width=None):
+        super().__init__()
+        self.numero = str(numero)
+        self.titulo = titulo
+        self.width  = width or CW
+        self.height = 9 * mm
+
+    def draw(self):
+        c = self.canv
+        c.setFillColor(ORANGE)
+        c.roundRect(0, 0, self.width, self.height, 2 * mm, fill=1, stroke=0)
+        r = 3.5 * mm
+        c.setFillColor(NAVY)
+        c.circle(r + 3 * mm, self.height / 2, r, fill=1, stroke=0)
+        c.setFillColor(WHITE)
+        c.setFont("Helvetica-Bold", 9)
+        c.drawCentredString(r + 3 * mm, self.height / 2 - 3, self.numero)
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(r * 2 + 6 * mm, self.height / 2 - 3.5, self.titulo.upper())
+
+
+class MetricCard(Flowable):
+    """Card de KPI individual."""
+    def __init__(self, label, value, sub="", width=40*mm, cor_borda=ORANGE):
+        super().__init__()
+        self.label     = label
+        self.value     = value
+        self.sub       = sub
+        self.width     = width
+        self.cor_borda = cor_borda
+        self.height    = 18 * mm
+
+    def draw(self):
+        c = self.canv
+        c.setFillColor(GRAY_BG)
+        c.roundRect(0, 0, self.width, self.height, 1.5 * mm, fill=1, stroke=0)
+        c.setStrokeColor(self.cor_borda)
+        c.setLineWidth(1.5)
+        c.line(0, 0, 0, self.height)
+        c.setFillColor(GRAY_LIGHT)
+        c.setFont("Helvetica", 7)
+        c.drawString(3 * mm, self.height - 5 * mm, self.label.upper())
+        c.setFillColor(NAVY)
+        c.setFont("Helvetica-Bold", 15)
+        c.drawString(3 * mm, self.height - 12 * mm, str(self.value))
+        c.setFillColor(GRAY_LIGHT)
+        c.setFont("Helvetica", 7)
+        c.drawString(3 * mm, 2 * mm, self.sub)
+
+
+class InsightBox(Flowable):
+    """Caixa de destaque com fundo escuro e tópicos."""
+    def __init__(self, titulo, linhas, width=None, cor=NAVY):
+        super().__init__()
+        self.titulo = titulo
+        self.linhas = linhas
+        self.width  = width or CW
+        self.cor    = cor
+        self.height = (len(linhas) * 5.5 + 13) * mm
+
+    def draw(self):
+        c = self.canv
+        c.setFillColor(self.cor)
+        c.roundRect(0, 0, self.width, self.height, 2 * mm, fill=1, stroke=0)
+        c.setFillColor(ORANGE)
+        c.setFont("Helvetica-Bold", 8)
+        c.drawString(4 * mm, self.height - 7 * mm, self.titulo.upper())
+        c.setFillColor(WHITE)
+        c.setFont("Helvetica", 8)
+        y = self.height - 12.5 * mm
+        for linha in self.linhas:
+            c.drawString(4 * mm, y, str(linha))
+            y -= 5.5 * mm
+
+
+class TagBadge(Flowable):
+    """Etiqueta colorida para etapas de funil."""
+    PRESETS = {
+        "TOPO":    NAVY,
+        "MEIO":    BLUE,
+        "FUNDO":   ORANGE,
+        "GOOGLE":  colors.HexColor("#34A853"),
+        "META":    colors.HexColor("#1877F2"),
+        "OK":      GREEN,
+        "ALERTA":  YELLOW,
+        "CRITICO": RED,
+    }
+
+    def __init__(self, texto, cor=None, largura=18*mm):
+        super().__init__()
+        self.texto   = texto
+        self.cor     = cor or self.PRESETS.get(texto.upper(), NAVY)
+        self.width   = largura
+        self.height  = 5 * mm
+
+    def draw(self):
+        c = self.canv
+        c.setFillColor(self.cor)
+        c.roundRect(0, 0.5 * mm, self.width, 4 * mm, 1 * mm, fill=1, stroke=0)
+        c.setFillColor(WHITE)
+        c.setFont("Helvetica-Bold", 7)
+        c.drawCentredString(self.width / 2, 1.8 * mm, self.texto.upper())
+
+
+# ── Helpers de tabela ──────────────────────────────────────────────────────
+
+def table_style_default(header_rows=1, alternate=True):
+    cmds = [
+        ("BACKGROUND",   (0, 0), (-1, header_rows - 1), NAVY),
+        ("GRID",         (0, 0), (-1, -1), 0.3, GRAY_LINE),
+        ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING",  (0, 0), (-1, -1), 3 * mm),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3 * mm),
+        ("TOPPADDING",   (0, 0), (-1, -1), 2.5 * mm),
+        ("BOTTOMPADDING",(0, 0), (-1, -1), 2.5 * mm),
+    ]
+    if alternate:
+        cmds.append(("ROWBACKGROUNDS", (0, header_rows), (-1, -1),
+                     [GRAY_BG, WHITE]))
+    return TableStyle(cmds)
+
+
+def table_total_row(row_index):
+    return TableStyle([
+        ("BACKGROUND",  (0, row_index), (-1, row_index), NAVY),
+        ("TEXTCOLOR",   (0, row_index), (-1, row_index), WHITE),
+        ("FONTNAME",    (0, row_index), (-1, row_index), "Helvetica-Bold"),
+        ("FONTSIZE",    (0, row_index), (-1, row_index), 8),
+    ])
+
+
+def make_cards_row(cards_data, n_cols=None):
+    """
+    cards_data: lista de dicts {label, value, sub, cor_borda}
+    Retorna Table de MetricCards lado a lado.
+    """
+    n = n_cols or len(cards_data)
+    card_w = (CW - (n - 1) * 3 * mm) / n
+    row = [MetricCard(d["label"], d["value"], d.get("sub", ""),
+                      card_w, d.get("cor", ORANGE))
+           for d in cards_data]
+    t = Table([row], colWidths=[card_w + 3 * mm] * n)
+    t.setStyle(TableStyle([
+        ("VALIGN",       (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING",  (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3 * mm),
+        ("TOPPADDING",   (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING",(0, 0), (-1, -1), 0),
+    ]))
+    return t
+
+
+# ── Gráficos ───────────────────────────────────────────────────────────────
+
+def chart_barras_horizontais(dados, largura_mm, altura_mm,
+                              formato="R$ {:,.2f}", titulo=None):
+    """
+    dados: lista de (rótulo, valor, cor)
+    """
+    d = Drawing(largura_mm * mm, altura_mm * mm)
+    d.add(Rect(0, 0, largura_mm * mm, altura_mm * mm,
+               fillColor=GRAY_BG, strokeColor=None))
+    th = 0
+    if titulo:
+        th = 7 * mm
+        d.add(String(4 * mm, altura_mm * mm - 5 * mm, titulo.upper(),
+                     fontName="Helvetica-Bold", fontSize=8, fillColor=ORANGE))
+    n = len(dados)
+    area_h   = altura_mm * mm - th - 4 * mm
+    bar_tot  = area_h / n
+    bar_h    = bar_tot * 0.55
+    label_w  = 55 * mm
+    val_w    = 24 * mm
+    bar_max  = largura_mm * mm - label_w - val_w - 4 * mm
+    max_v    = max(x[1] for x in dados) * 1.15 if dados else 1
+    for i, (rot, val, cor) in enumerate(dados):
+        y = altura_mm * mm - th - (i + 1) * bar_tot + (bar_tot - bar_h) / 2
+        d.add(String(4 * mm, y + bar_h / 2 - 3, rot,
+                     fontName="Helvetica-Bold", fontSize=8, fillColor=NAVY))
+        d.add(Rect(label_w, y, bar_max, bar_h,
+                   fillColor=colors.HexColor("#E8EAF2"), strokeColor=None))
+        w = max(2, bar_max * (val / max_v))
+        d.add(Rect(label_w, y, w, bar_h, fillColor=cor, strokeColor=None))
+        d.add(String(label_w + bar_max + 3, y + bar_h / 2 - 3,
+                     formato.format(val),
+                     fontName="Helvetica-Bold", fontSize=8, fillColor=NAVY))
+    return d
+
+
+def chart_donut(dados, largura_mm, altura_mm, titulo=None):
+    """
+    dados: lista de (rótulo, valor, cor)
+    """
+    d = Drawing(largura_mm * mm, altura_mm * mm)
+    d.add(Rect(0, 0, largura_mm * mm, altura_mm * mm,
+               fillColor=GRAY_BG, strokeColor=None))
+    if titulo:
+        d.add(String(4 * mm, altura_mm * mm - 5 * mm, titulo.upper(),
+                     fontName="Helvetica-Bold", fontSize=8, fillColor=ORANGE))
+    total = sum(x[1] for x in dados) or 1
+    cy  = altura_mm * mm / 2 - 2 * mm
+    cx  = (altura_mm - 14) * mm / 2 + 4 * mm
+    r_o = (altura_mm - 14) * mm / 2
+    r_i = r_o * 0.6
+    start = 90
+    for rot, val, cor in dados:
+        sweep = -(val / total) * 360
+        d.add(Wedge(cx, cy, r_o, start + sweep, start,
+                    fillColor=cor, strokeColor=WHITE, strokeWidth=1.5))
+        start += sweep
+    d.add(Circle(cx, cy, r_i, fillColor=GRAY_BG, strokeColor=None))
+    d.add(String(cx, cy + 2, "TOTAL",
+                 fontName="Helvetica", fontSize=6, fillColor=GRAY_LIGHT,
+                 textAnchor="middle"))
+    d.add(String(cx, cy - 6, f"R$ {total:,.0f}".replace(",", "."),
+                 fontName="Helvetica-Bold", fontSize=10, fillColor=NAVY,
+                 textAnchor="middle"))
+    lx = cx + r_o + 8 * mm
+    ly = altura_mm * mm - 14 * mm
+    for rot, val, cor in dados:
+        pct = val / total * 100
+        d.add(Rect(lx, ly, 3 * mm, 3 * mm, fillColor=cor, strokeColor=None))
+        d.add(String(lx + 5 * mm, ly + 0.5, rot,
+                     fontName="Helvetica-Bold", fontSize=8, fillColor=NAVY))
+        d.add(String(lx + 5 * mm, ly - 4,
+                     f"R$ {val:,.2f} ({pct:.0f}%)".replace(",", "."),
+                     fontName="Helvetica", fontSize=7, fillColor=GRAY_DARK))
+        ly -= 10 * mm
+    return d
+
+
+def chart_barras_verticais_duplas(dados, largura_mm, altura_mm,
+                                   label1="Leads", label2="CPL",
+                                   cor1=ORANGE, cor2=GREEN, titulo=None):
+    """
+    dados: lista de (rótulo, val1, val2_formatado_str)
+    """
+    d = Drawing(largura_mm * mm, altura_mm * mm)
+    d.add(Rect(0, 0, largura_mm * mm, altura_mm * mm,
+               fillColor=GRAY_BG, strokeColor=None))
+    if titulo:
+        d.add(String(4 * mm, altura_mm * mm - 5 * mm, titulo.upper(),
+                     fontName="Helvetica-Bold", fontSize=8, fillColor=ORANGE))
+    n = len(dados)
+    bottom = 14 * mm
+    top    = altura_mm * mm - 10 * mm
+    ch     = top - bottom
+    grp_w  = (largura_mm * mm - 8 * mm) / n
+    bw     = grp_w * 0.3
+    max1   = max(x[1] for x in dados) * 1.2 if dados else 1
+    for i, item in enumerate(dados):
+        rot = item[0]
+        v1  = item[1]
+        v2s = item[2] if len(item) > 2 else ""
+        cx  = 4 * mm + grp_w * (i + 0.5)
+        h1  = ch * (v1 / max1)
+        x1  = cx - bw - 1 * mm
+        d.add(Rect(x1, bottom, bw, h1, fillColor=cor1, strokeColor=None))
+        d.add(String(x1 + bw / 2, bottom + h1 + 2, str(v1),
+                     fontName="Helvetica-Bold", fontSize=8,
+                     fillColor=NAVY, textAnchor="middle"))
+        if v2s:
+            d.add(Rect(cx + 1 * mm, bottom, bw, h1 * 0.6,
+                       fillColor=cor2, strokeColor=None))
+            d.add(String(cx + 1 * mm + bw / 2, bottom + h1 * 0.6 + 2, v2s,
+                         fontName="Helvetica-Bold", fontSize=8,
+                         fillColor=NAVY, textAnchor="middle"))
+        d.add(String(cx, bottom - 5, rot,
+                     fontName="Helvetica-Bold", fontSize=8,
+                     fillColor=NAVY, textAnchor="middle"))
+    # legenda
+    lx = largura_mm * mm - 55 * mm
+    ly = altura_mm * mm - 6 * mm
+    d.add(Rect(lx, ly, 3 * mm, 3 * mm, fillColor=cor1, strokeColor=None))
+    d.add(String(lx + 5 * mm, ly + 0.5, label1,
+                 fontName="Helvetica", fontSize=7, fillColor=NAVY))
+    d.add(Rect(lx + 28 * mm, ly, 3 * mm, 3 * mm, fillColor=cor2, strokeColor=None))
+    d.add(String(lx + 33 * mm, ly + 0.5, label2,
+                 fontName="Helvetica", fontSize=7, fillColor=NAVY))
+    return d
+
+
+# ── Rodapé de página ───────────────────────────────────────────────────────
+
+def draw_footer(canvas, doc, cliente, total_pags):
+    canvas.saveState()
+    canvas.setFillColor(NAVY)
+    canvas.rect(0, 0, W, 10 * mm, fill=1, stroke=0)
+    canvas.setFillColor(WHITE)
+    canvas.setFont("Helvetica", 7)
+    canvas.drawString(MARGIN, 3 * mm, f"MarkSeg x {cliente.upper()}")
+    canvas.drawCentredString(W / 2, 3 * mm, "MARKSEG · AGENCIA DE TRAFEGO")
+    canvas.setFillColor(ORANGE)
+    canvas.setFont("Helvetica-Bold", 7)
+    canvas.drawRightString(W - MARGIN, 3 * mm,
+                           f"PAG. {doc.page:02d} / {total_pags:02d}")
+    canvas.restoreState()
+
+
+# ── Capa padrão ────────────────────────────────────────────────────────────
+
+def draw_cover(canvas, doc, titulo_doc, subtitulo_doc,
+               cliente, agencia, periodo, info_extra="",
+               frase_resumo="", frase_destaque=""):
+    """Renderiza a capa completa no canvas."""
+    canvas.saveState()
+
+    # faixa topo navy
+    canvas.setFillColor(NAVY)
+    canvas.rect(0, H - 28 * mm, W, 28 * mm, fill=1, stroke=0)
+
+    # logo (se existir)
+    if os.path.exists(LOGO_PATH):
+        try:
+            canvas.drawImage(LOGO_PATH, MARGIN, H - 23 * mm,
+                             width=38 * mm, height=16 * mm,
+                             preserveAspectRatio=True, mask="auto")
+        except Exception:
+            pass
+    else:
+        canvas.setFillColor(WHITE)
+        canvas.setFont("Helvetica-Bold", 14)
+        canvas.drawString(MARGIN, H - 12 * mm, "MarkSeg")
+        canvas.setFillColor(ORANGE)
+        canvas.setFont("Helvetica-Bold", 9)
+        canvas.drawString(MARGIN, H - 20 * mm, "Agencia de Trafego")
+
+    # tag direita
+    canvas.setFillColor(ORANGE)
+    canvas.rect(W - 55 * mm, H - 28 * mm, 55 * mm, 28 * mm, fill=1, stroke=0)
+    canvas.setFillColor(WHITE)
+    canvas.setFont("Helvetica-Bold", 8)
+    canvas.drawCentredString(W - 27 * mm, H - 10 * mm,
+                              titulo_doc.upper())
+    canvas.setFont("Helvetica", 7)
+    canvas.drawCentredString(W - 27 * mm, H - 16 * mm, agencia)
+    canvas.drawCentredString(W - 27 * mm, H - 21 * mm, periodo)
+
+    # barra laranja vertical
+    canvas.setFillColor(ORANGE)
+    canvas.rect(MARGIN, H - 85 * mm, 1.5 * mm, 45 * mm, fill=1, stroke=0)
+
+    # título principal
+    canvas.setFillColor(NAVY)
+    canvas.setFont("Helvetica-Bold", 28)
+    canvas.drawString(MARGIN + 6 * mm, H - 55 * mm, titulo_doc)
+    canvas.setFillColor(ORANGE)
+    canvas.setFont("Helvetica-Bold", 28)
+    canvas.drawString(MARGIN + 6 * mm, H - 69 * mm, subtitulo_doc)
+    canvas.setFillColor(NAVY)
+    canvas.setFont("Helvetica-Bold", 18)
+    canvas.drawString(MARGIN + 6 * mm, H - 82 * mm, cliente + ".")
+
+    # subtítulo descritivo
+    canvas.setFillColor(GRAY_DARK)
+    canvas.setFont("Helvetica", 9)
+    canvas.drawString(MARGIN + 6 * mm, H - 92 * mm, info_extra)
+
+    # cards de info
+    info = [("CLIENTE", cliente), ("AGENCIA", agencia), ("PERIODO", periodo)]
+    bw = (W - 2 * MARGIN) / len(info)
+    y0 = H - 132 * mm
+    for i, (lbl, val) in enumerate(info):
+        x0 = MARGIN + i * bw
+        canvas.setFillColor(GRAY_BG)
+        canvas.roundRect(x0, y0, bw - 3 * mm, 22 * mm, 2 * mm,
+                          fill=1, stroke=0)
+        canvas.setFillColor(ORANGE)
+        canvas.setFont("Helvetica-Bold", 7)
+        canvas.drawString(x0 + 3 * mm, y0 + 14 * mm, lbl)
+        canvas.setFillColor(NAVY)
+        canvas.setFont("Helvetica-Bold", 9)
+        canvas.drawString(x0 + 3 * mm, y0 + 7 * mm, val)
+
+    # caixa de resumo
+    if frase_resumo or frase_destaque:
+        canvas.setFillColor(NAVY)
+        canvas.roundRect(MARGIN, H - 178 * mm, W - 2 * MARGIN, 30 * mm,
+                          2 * mm, fill=1, stroke=0)
+        canvas.setFillColor(ORANGE)
+        canvas.setFont("Helvetica-Bold", 7)
+        canvas.drawString(MARGIN + 5 * mm, H - 153 * mm,
+                           "RESUMO EXECUTIVO · EM UMA FRASE")
+        canvas.setFillColor(WHITE)
+        canvas.setFont("Helvetica-Bold", 13)
+        canvas.drawString(MARGIN + 5 * mm, H - 163 * mm, frase_resumo)
+        canvas.setFillColor(ORANGE)
+        canvas.setFont("Helvetica-Bold", 13)
+        canvas.drawString(MARGIN + 5 * mm, H - 174 * mm, frase_destaque)
+
+    # rodapé
+    canvas.setFillColor(NAVY)
+    canvas.rect(0, 0, W, 10 * mm, fill=1, stroke=0)
+    canvas.setFillColor(WHITE)
+    canvas.setFont("Helvetica", 7)
+    canvas.drawString(MARGIN, 3 * mm, f"MarkSeg x {cliente.upper()}")
+    canvas.setFillColor(ORANGE)
+    canvas.setFont("Helvetica-Bold", 7)
+    canvas.drawRightString(W - MARGIN, 3 * mm, "PAG. 01")
+
+    canvas.restoreState()
