@@ -412,36 +412,45 @@ def draw_cover(canvas, doc, titulo_doc, subtitulo_doc,
     """Renderiza a capa completa no canvas."""
     canvas.saveState()
 
-    # faixa topo navy
+    # faixa topo navy (só a metade direita)
     canvas.setFillColor(NAVY)
-    canvas.rect(0, H - 28 * mm, W, 28 * mm, fill=1, stroke=0)
+    canvas.rect(W / 2, H - 28 * mm, W / 2, 28 * mm, fill=1, stroke=0)
 
-    # logo (se existir)
+    # área branca esquerda com logo
+    canvas.setFillColor(WHITE)
+    canvas.rect(0, H - 28 * mm, W / 2, 28 * mm, fill=1, stroke=0)
+
+    # logo na área branca
     if os.path.exists(LOGO_PATH):
         try:
-            canvas.drawImage(LOGO_PATH, MARGIN, H - 23 * mm,
-                             width=38 * mm, height=16 * mm,
+            canvas.drawImage(LOGO_PATH, MARGIN, H - 24 * mm,
+                             width=50 * mm, height=18 * mm,
                              preserveAspectRatio=True, mask="auto")
         except Exception:
-            pass
+            canvas.setFillColor(NAVY)
+            canvas.setFont("Helvetica-Bold", 14)
+            canvas.drawString(MARGIN, H - 14 * mm, "MarkSeg")
     else:
-        canvas.setFillColor(WHITE)
+        canvas.setFillColor(NAVY)
         canvas.setFont("Helvetica-Bold", 14)
-        canvas.drawString(MARGIN, H - 12 * mm, "MarkSeg")
+        canvas.drawString(MARGIN, H - 14 * mm, "MarkSeg")
         canvas.setFillColor(ORANGE)
         canvas.setFont("Helvetica-Bold", 9)
-        canvas.drawString(MARGIN, H - 20 * mm, "Agencia de Trafego")
+        canvas.drawString(MARGIN, H - 21 * mm, "Agencia de Trafego")
 
-    # tag direita
+    # tag direita (laranja) sobre fundo navy
     canvas.setFillColor(ORANGE)
     canvas.rect(W - 55 * mm, H - 28 * mm, 55 * mm, 28 * mm, fill=1, stroke=0)
     canvas.setFillColor(WHITE)
     canvas.setFont("Helvetica-Bold", 8)
-    canvas.drawCentredString(W - 27 * mm, H - 10 * mm,
-                              titulo_doc.upper())
+    canvas.drawCentredString(W - 27 * mm, H - 10 * mm, titulo_doc.upper())
     canvas.setFont("Helvetica", 7)
     canvas.drawCentredString(W - 27 * mm, H - 16 * mm, agencia)
     canvas.drawCentredString(W - 27 * mm, H - 21 * mm, periodo)
+
+    # linha separadora embaixo do header
+    canvas.setFillColor(GRAY_LINE)
+    canvas.rect(0, H - 29 * mm, W, 1, fill=1, stroke=0)
 
     # barra laranja vertical
     canvas.setFillColor(ORANGE)
