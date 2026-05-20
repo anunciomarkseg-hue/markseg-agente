@@ -352,6 +352,35 @@ def montar_dados(tipo, cliente, periodo, responsavel,
             "frase_destaque": f"CPL médio R$ {cpl_geral:.2f} · resultado do mês.",
         })
 
+    # ── Ficha de Implantação ──────────────────────────────────────────────
+    elif tipo == "ficha_implantacao":
+        # tenta extrair responsáveis do texto livre (padrão "Cargo: Nome")
+        responsaveis = []
+        for linha in linhas_livres:
+            if ":" in linha:
+                partes = linha.split(":", 1)
+                responsaveis.append({"cargo": partes[0].strip(), "nome": partes[1].strip()})
+        dados.update({
+            "responsaveis":        responsaveis,
+            "postagens_mensais":   "",
+            "formato_prioritario": "",
+            "linguagem":           "",
+            "layout_cores":        "",
+            "descricao_empresa":   "",
+            "posicionamento":      "",
+            "diferenciais":        [],
+            "publico_perfis":      "",
+            "publico_meta":        "",
+            "publico_estrategia":  "",
+            "leads_canais":        "",
+            "leads_estrategia":    "",
+            "comunicacao":         [],
+            "processos":           [],
+            "obj_curto_prazo":     "",
+            "obj_medio_prazo":     "",
+            "obj_trafego":         "",
+        })
+
     # ── Planejamento Estratégico ──────────────────────────────────────────
     elif tipo == "planejamento_estrategico":
         dados.update({
