@@ -4,8 +4,13 @@ Interface Streamlit para geração de PDFs padronizados da agência.
 """
 
 import streamlit as st
-import os, tempfile, json
+import os, sys, tempfile, json
 from datetime import date
+
+# garante que o diretório raiz do projeto está no path (necessário no Streamlit Cloud)
+ROOT = os.path.dirname(os.path.abspath(__file__))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 
 # ── Config da página ──────────────────────────────────────────────────────
 st.set_page_config(
