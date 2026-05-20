@@ -195,11 +195,187 @@ def extrair_do_texto(texto: str) -> dict:
     for pat in [r"frase(?:\s+de)?\s+destaque[:\s]+([^\n\.]+)", r"destaque[:\s]+([^\n\.]+)"]:
         m = re.search(pat, texto, re.I)
         if m: d["frase_destaque"] = m.group(1).strip(); break
-    # insights / próximos passos em linhas com "-" ou "•"
-    linhas = [l.strip().lstrip("-•·").strip() for l in texto.split("\n")
-              if l.strip().startswith(("-","•","·")) and len(l.strip()) > 5]
-    if linhas: d["linhas_livres"] = linhas
+    # todas as linhas não-vazias (não só bullets)
+    todas = [l.strip().lstrip("-•·▪*").strip()
+             for l in texto.split("\n") if l.strip() and len(l.strip()) > 2]
+    if todas:
+        d["todas_linhas"] = todas
+    # linhas bullet (subconjunto para compatibilidade com outros templates)
+    linhas = [l.strip().lstrip("-•·▪*").strip()
+              for l in texto.split("\n")
+              if l.strip() and l.strip()[0] in ("-","•","·","*","▪") and len(l.strip()) > 3]
+    d["linhas_livres"] = linhas or todas
     return d
+
+
+# ── Parser completo: texto → blocos estruturados ──────────────────────────
+
+def parse_texto_completo(texto: str) -> list:
+    """
+    Converte texto livre numa lista de blocos para renderização no template.
+    Tipos de bloco: titulo | secao | subsecao | tabela | bullets | keyvalues | texto
+    Garante que NENHUMA linha do texto original se perde.
+    """
+    if not texto or not texto.strip():
+        return []
+
+    blocos = []
+    linhas = texto.split("\n")
+    n = len(linhas)
+    i = 0
+    primeiro_bloco = True
+
+    def lx(j):
+        return linhas[j].strip() if j < n else ""
+
+    def tem_sep(j):
+        l = linhas[j] if j < n else ""
+        return "\t" in l or l.count("|") >= 2
+
+    while i < n:
+        ln = linhas[i]
+        limpa = ln.strip()
+
+        if not limpa:
+            i += 1
+            continue
+
+        # ── Tabela: linha atual ou próxima tem separadores ──────────────
+        if tem_sep(i) or (tem_sep(i + 1) and limpa):
+            rows_raw = []
+            while i < n and lx(i):
+                l = linhas[i]
+                ll = l.strip()
+                if "\t" in l:
+                    row = [c.strip() for c in l.split("\t")]
+                elif ll.count("|") >= 2:
+                    row = [c.strip() for c in ll.strip("|").split("|")]
+                else:
+                    break
+                # ignora linha separadora (só traços/dois pontos)
+                if not all(re.match(r"^[-:=]+$", c) for c in row if c):
+                    rows_raw.append(row)
+                i += 1
+            if rows_raw:
+                ncols = max(len(r) for r in rows_raw)
+                rows_norm = [r + [""] * (ncols - len(r)) for r in rows_raw]
+                blocos.append({
+                    "tipo": "tabela",
+                    "cabecalho": rows_norm[0] if rows_norm else [],
+                    "linhas":    rows_norm[1:],
+                })
+            continue
+
+        # ── Seção numerada: "1. TITULO" ──────────────────────────────────
+        m = re.match(r"^(\d+)\.\s+(.+)$", limpa)
+        if m:
+            blocos.append({"tipo": "secao", "numero": m.group(1),
+                           "texto": m.group(2).strip()})
+            primeiro_bloco = False
+            i += 1
+            continue
+
+        # ── Sub-seção: linha curta toda maiúscula ─────────────────────────
+        is_upper = (limpa == limpa.upper() and
+                    bool(re.search(r"[A-ZÁÉÍÓÚÃÕÂÊÔÇÀ]{3,}", limpa)) and
+                    len(limpa) < 90 and
+                    limpa[0] not in "-•*[✅⚠📅🔧→")
+        if is_upper and not m:
+            blocos.append({"tipo": "subsecao", "texto": limpa})
+            primeiro_bloco = False
+            i += 1
+            continue
+
+        # ── Sub-seção: curta, termina em ":" ─────────────────────────────
+        if (limpa.endswith(":") and len(limpa) < 80 and
+                limpa[0] not in "-•*✅⚠"):
+            blocos.append({"tipo": "subsecao", "texto": limpa.rstrip(":")})
+            primeiro_bloco = False
+            i += 1
+            continue
+
+        # ── Título: primeira linha curta sem marcação especial ─────────────
+        if primeiro_bloco and len(limpa) < 100 and limpa[0] not in "-•*✅⚠📅🔧→[":
+            blocos.append({"tipo": "titulo", "texto": limpa})
+            primeiro_bloco = False
+            i += 1
+            continue
+
+        # ── Bloco de bullets ─────────────────────────────────────────────
+        BULLET_CHARS = set("-•*✅⚠📅🔧→[")
+        if limpa[0] in BULLET_CHARS:
+            itens = []
+            while i < n and lx(i):
+                ll = lx(i)
+                if ll and ll[0] in BULLET_CHARS:
+                    itens.append(ll.lstrip("-•*→✅⚠📅🔧").strip().strip("[]"))
+                    i += 1
+                else:
+                    break
+            if itens:
+                blocos.append({"tipo": "bullets", "itens": itens})
+            continue
+
+        # ── Bloco de key: value (2+ consecutivas) ────────────────────────
+        KV_RE = re.compile(r"^([^:\n]{1,60}):\s+(.+)$")
+        j, kv_count = i, 0
+        while j < n and lx(j):
+            if KV_RE.match(lx(j)):
+                kv_count += 1
+                j += 1
+            else:
+                break
+        if kv_count >= 2:
+            kvs = []
+            while i < n and lx(i):
+                m2 = KV_RE.match(lx(i))
+                if m2:
+                    kvs.append({"chave": m2.group(1).strip(),
+                                "valor": m2.group(2).strip()})
+                    i += 1
+                else:
+                    break
+            if kvs:
+                blocos.append({"tipo": "keyvalues", "itens": kvs})
+            continue
+
+        # ── Parágrafo de texto livre ──────────────────────────────────────
+        txt_linhas = []
+        while i < n and lx(i):
+            ll  = lx(i)
+            raw = linhas[i]
+            # para se linha seguinte é de outro tipo
+            if (re.match(r"^(\d+)\.\s+", ll) or
+                    tem_sep(i) or
+                    (ll and ll[0] in BULLET_CHARS) or
+                    (ll == ll.upper() and bool(re.search(r"[A-Z]{3,}", ll))
+                     and len(ll) < 90 and ll[0] not in "-•*[") or
+                    (ll.endswith(":") and len(ll) < 80 and ll[0] not in "-•*")):
+                break
+            txt_linhas.append(ll)
+            i += 1
+        if txt_linhas:
+            blocos.append({"tipo": "texto", "linhas": txt_linhas})
+            primeiro_bloco = False
+        continue
+
+    return blocos
+
+
+# ── Segmentação simples (mantida para compatibilidade) ─────────────────────
+
+def segmentar_texto(texto: str) -> dict:
+    """Fallback simples — agrupa linhas por seção detectada."""
+    secoes: dict = {}
+    secao_atual = "geral"
+    for linha in texto.split("\n"):
+        limpa = linha.strip()
+        if not limpa:
+            continue
+        conteudo = limpa.lstrip("-•·▪*#").strip()
+        if conteudo:
+            secoes.setdefault(secao_atual, []).append(conteudo)
+    return secoes
 
 
 # ── Montador principal ─────────────────────────────────────────────────────
@@ -383,17 +559,22 @@ def montar_dados(tipo, cliente, periodo, responsavel,
 
     # ── Planejamento Estratégico ──────────────────────────────────────────
     elif tipo == "planejamento_estrategico":
+        # converte TODO o texto colado em blocos para renderização
+        blocos = parse_texto_completo(texto_livre) if texto_livre else []
+
+        # também inclui texto extraído de PDFs/TXTs enviados como arquivo
+        for txt in textos:
+            blocos_arq = parse_texto_completo(txt)
+            if blocos_arq:
+                blocos.append({"tipo": "subsecao", "texto": "ARQUIVO ANEXADO"})
+                blocos.extend(blocos_arq)
+
         dados.update({
-            "horizonte": periodo or "90 dias",
-            "diagnostico": linhas_livres,
-            "objetivos": [],
-            "pilares": [],
-            "cronograma": [],
-            "kpis": [],
-            "riscos": [],
-            "proximos_passos": [],
-            "frase_resumo":   dados.get("frase_resumo") or "Planejamento estruturado para crescimento sustentável.",
-            "frase_destaque": dados.get("frase_destaque") or "Estratégia clara · execução semana a semana.",
+            "horizonte":      periodo or "",
+            "blocos":         blocos,
+            "frase_resumo":   extras.get("frase_resumo", ""),
+            "frase_destaque": extras.get("frase_destaque", ""),
+            "info_capa":      f"Planejamento estrategico · {periodo}" if periodo else "",
         })
 
     # ── Proposta Comercial ────────────────────────────────────────────────

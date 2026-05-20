@@ -77,30 +77,57 @@ CW_MM = CW / mm            # em mm
 # ── Flowables ──────────────────────────────────────────────────────────────
 
 class PageHeader(Flowable):
-    """Faixa de cabeçalho interno de página."""
+    """Cabeçalho interno de página — fundo branco com logo."""
     def __init__(self, cliente, subtitulo, pagina):
         super().__init__()
         self.cliente   = cliente
         self.subtitulo = subtitulo
         self.pagina    = pagina
         self.width     = CW
-        self.height    = 14 * mm
+        self.height    = 16 * mm
 
     def draw(self):
         c = self.canv
-        c.setFillColor(NAVY)
-        c.rect(0, 0, self.width, self.height, fill=1, stroke=0)
+        # fundo branco
         c.setFillColor(WHITE)
-        c.setFont("Helvetica-Bold", 8)
-        c.drawString(4 * mm, 5.5 * mm, self.cliente.upper())
+        c.rect(0, 0, self.width, self.height, fill=1, stroke=0)
+        # logo à esquerda
+        logo_w = 32 * mm
+        if os.path.exists(LOGO_PATH):
+            try:
+                c.drawImage(LOGO_PATH, 0, 1 * mm,
+                            width=logo_w, height=13 * mm,
+                            preserveAspectRatio=True, mask="auto")
+            except Exception:
+                c.setFillColor(NAVY)
+                c.setFont("Helvetica-Bold", 9)
+                c.drawString(0, 5 * mm, "MarkSeg")
+                logo_w = 22 * mm
+        else:
+            c.setFillColor(NAVY)
+            c.setFont("Helvetica-Bold", 9)
+            c.drawString(0, 5 * mm, "MarkSeg")
+            logo_w = 22 * mm
+        # linha divisória vertical laranja
+        c.setStrokeColor(ORANGE)
+        c.setLineWidth(1.5)
+        c.line(logo_w + 3 * mm, 2 * mm, logo_w + 3 * mm, self.height - 2 * mm)
+        # cliente + subtítulo à direita da linha
+        tx = logo_w + 6 * mm
+        c.setFillColor(NAVY)
+        c.setFont("Helvetica-Bold", 9)
+        c.drawString(tx, 8.5 * mm, self.cliente.upper())
         c.setFillColor(ORANGE)
         c.setFont("Helvetica", 7)
-        c.drawString(4 * mm, 2 * mm, self.subtitulo.upper())
-        c.setFillColor(WHITE)
-        c.setFont("Helvetica", 7)
-        c.drawRightString(self.width - 4 * mm, 8 * mm, "MarkSeg · Agência de Tráfego")
-        c.setFont("Helvetica-Bold", 7)
-        c.drawRightString(self.width - 4 * mm, 2.5 * mm, self.pagina)
+        c.drawString(tx, 3 * mm, self.subtitulo.upper())
+        # número de página à direita
+        c.setFillColor(NAVY)
+        c.setFont("Helvetica-Bold", 8)
+        c.drawRightString(self.width, 6 * mm, self.pagina)
+        # linha laranja na base
+        c.setStrokeColor(ORANGE)
+        c.setLineWidth(1)
+        c.line(0, 0, self.width, 0)
 
 
 class SectionHeader(Flowable):
