@@ -23,26 +23,77 @@ st.set_page_config(
 
 st.markdown("""
 <style>
+/* ── Base ── */
 .stApp { background: #F5F6FA; }
-h1 { color: #1B3A6B !important; font-weight: 800 !important; }
-.block { background: white; border-radius: 12px; padding: 20px 24px;
-         border: 1px solid #E0E3EE; margin-bottom: 16px; }
-.sec-title { background: #1B3A6B; color: white; border-radius: 8px;
-             padding: 8px 14px; font-weight: 700; font-size: 0.82rem;
-             letter-spacing: 0.05em; margin: 20px 0 10px 0; }
-.tip { background: #FFF8F2; border-left: 3px solid #F5821E;
-       border-radius: 0 8px 8px 0; padding: 10px 14px;
-       font-size: 0.82rem; color: #555; margin-bottom: 16px; }
+h1, h2, h3 { color: #1B3A6B !important; font-weight: 800 !important; }
+
+.sec-title {
+    background: #1B3A6B; color: white; border-radius: 8px;
+    padding: 8px 14px; font-weight: 700; font-size: 0.82rem;
+    letter-spacing: 0.05em; margin: 20px 0 10px 0;
+}
+.tip {
+    background: #FFF8F2; border-left: 3px solid #F5821E;
+    border-radius: 0 8px 8px 0; padding: 10px 14px;
+    font-size: 0.82rem; color: #555; margin-bottom: 16px;
+    line-height: 1.5;
+}
+
+/* ── Botão principal ── */
 .stButton > button {
     background: #F5821E !important; color: white !important;
     border: none !important; font-weight: 700 !important;
-    font-size: 1rem !important; padding: 0.65rem 2rem !important;
+    font-size: 1rem !important;
+    padding: 0.75rem 2rem !important;
     border-radius: 8px !important; width: 100%;
+    min-height: 48px;          /* touch-friendly */
 }
 .stButton > button:hover { background: #D4691A !important; }
+
+/* botões secundários (Selecionar) */
+button[kind="secondary"] {
+    font-size: 0.75rem !important;
+    padding: 0.3rem 0.5rem !important;
+    min-height: 32px !important;
+}
+
+/* ── Upload ── */
 div[data-testid="stFileUploader"] {
     border: 2px dashed #E0E3EE !important;
     border-radius: 10px !important; padding: 8px !important;
+}
+
+/* ── Inputs ── */
+.stTextInput input, .stTextArea textarea {
+    border-radius: 8px !important;
+    border: 1.5px solid #E0E3EE !important;
+    font-size: 0.95rem !important;
+    padding: 10px 12px !important;
+}
+.stTextInput input:focus, .stTextArea textarea:focus {
+    border-color: #F5821E !important;
+    box-shadow: 0 0 0 2px rgba(245,130,30,0.15) !important;
+}
+.stTextArea textarea { min-height: 130px !important; }
+
+/* ── Selectbox ── */
+.stSelectbox > div > div {
+    border-radius: 8px !important;
+    border: 1.5px solid #E0E3EE !important;
+    font-size: 0.95rem !important;
+}
+
+/* ── Mobile ── */
+@media (max-width: 640px) {
+    .sec-title { font-size: 0.75rem; padding: 7px 10px; }
+    .tip        { font-size: 0.8rem; padding: 8px 10px; }
+    .stButton > button { font-size: 0.95rem !important; min-height: 52px; }
+
+    /* empilha colunas do header em mobile */
+    [data-testid="column"] { min-width: 100% !important; }
+
+    /* espaçamento geral menor */
+    .block-container { padding-left: 12px !important; padding-right: 12px !important; }
 }
 </style>
 """, unsafe_allow_html=True)
