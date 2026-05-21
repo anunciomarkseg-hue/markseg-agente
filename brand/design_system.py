@@ -13,10 +13,51 @@ from reportlab.platypus import Flowable, Table, TableStyle, Paragraph, Spacer
 from reportlab.graphics.shapes import (
     Drawing, Rect, String, Line, Circle, Wedge, Group, Polygon
 )
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 # ── Dimensões ──────────────────────────────────────────────────────────────
 W, H = A4
 LOGO_PATH = os.path.join(os.path.dirname(__file__), "logo.png")
+
+# ── Registro de fontes Unicode (suporte a acentos) ─────────────────────────
+_FONTS_REG = [
+    # Linux / Streamlit Cloud (Ubuntu)
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+    "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf",
+    # macOS
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "/Library/Fonts/Arial.ttf",
+    # Windows
+    "C:/Windows/Fonts/arial.ttf",
+    "C:/Windows/Fonts/calibri.ttf",
+]
+_FONTS_BOLD = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+    "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    "C:/Windows/Fonts/arialbd.ttf",
+    "C:/Windows/Fonts/calibrib.ttf",
+]
+
+def _try_register(name, paths):
+    for p in paths:
+        if os.path.exists(p):
+            try:
+                pdfmetrics.registerFont(TTFont(name, p))
+                return True
+            except Exception:
+                continue
+    return False
+
+_has_unicode = _try_register("MKS", _FONTS_REG) and _try_register("MKS-Bold", _FONTS_BOLD)
+
+FONT_REG  = "MKS"      if _has_unicode else "Helvetica"
+FONT_BOLD = "MKS-Bold" if _has_unicode else "Helvetica-Bold"
 
 # ── Paleta MarkSeg ─────────────────────────────────────────────────────────
 NAVY        = colors.HexColor("#1B3A6B")   # azul escuro principal
@@ -33,12 +74,16 @@ RED         = colors.HexColor("#E74C3C")
 YELLOW      = colors.HexColor("#F39C12")
 
 # ── Tipografia ─────────────────────────────────────────────────────────────
-def style(name, font="Helvetica", size=10, color=None, align=TA_LEFT,
+def style(name, font=None, size=10, color=None, align=TA_LEFT,
           leading=None, before=0, after=0, bold=False):
     if color is None:
         color = NAVY
-    if bold:
-        font = font.replace("Helvetica", "Helvetica-Bold")
+    if font is None:
+        font = FONT_BOLD if bold else FONT_REG
+    elif font == "Helvetica":
+        font = FONT_BOLD if bold else FONT_REG
+    elif bold and not font.endswith("-Bold"):
+        font = FONT_BOLD
     return ParagraphStyle(
         name=name, fontName=font, fontSize=size, textColor=color,
         alignment=align, leading=leading or round(size * 1.35),
@@ -100,12 +145,12 @@ class PageHeader(Flowable):
                             preserveAspectRatio=True, mask="auto")
             except Exception:
                 c.setFillColor(NAVY)
-                c.setFont("Helvetica-Bold", 9)
+                c.setFont(FONT_BOLD, 9)
                 c.drawString(0, 5 * mm, "MarkSeg")
                 logo_w = 22 * mm
         else:
             c.setFillColor(NAVY)
-            c.setFont("Helvetica-Bold", 9)
+            c.setFont(FONT_BOLD, 9)
             c.drawString(0, 5 * mm, "MarkSeg")
             logo_w = 22 * mm
         # linha divisória vertical laranja
@@ -115,14 +160,14 @@ class PageHeader(Flowable):
         # cliente + subtítulo à direita da linha
         tx = logo_w + 6 * mm
         c.setFillColor(NAVY)
-        c.setFont("Helvetica-Bold", 9)
+        c.setFont(FONT_BOLD, 9)
         c.drawString(tx, 8.5 * mm, self.cliente.upper())
         c.setFillColor(ORANGE)
-        c.setFont("Helvetica", 7)
+        c.setFont(FONT_REG, 7)
         c.drawString(tx, 3 * mm, self.subtitulo.upper())
         # número de página à direita
         c.setFillColor(NAVY)
-        c.setFont("Helvetica-Bold", 8)
+        c.setFont(FONT_BOLD, 8)
         c.drawRightString(self.width, 6 * mm, self.pagina)
         # linha laranja na base
         c.setStrokeColor(ORANGE)
@@ -147,9 +192,9 @@ class SectionHeader(Flowable):
         c.setFillColor(NAVY)
         c.circle(r + 3 * mm, self.height / 2, r, fill=1, stroke=0)
         c.setFillColor(WHITE)
-        c.setFont("Helvetica-Bold", 9)
+        c.setFont(FONT_BOLD, 9)
         c.drawCentredString(r + 3 * mm, self.height / 2 - 3, self.numero)
-        c.setFont("Helvetica-Bold", 10)
+        c.setFont(FONT_BOLD, 10)
         c.drawString(r * 2 + 6 * mm, self.height / 2 - 3.5, self.titulo.upper())
 
 
@@ -172,13 +217,13 @@ class MetricCard(Flowable):
         c.setLineWidth(1.5)
         c.line(0, 0, 0, self.height)
         c.setFillColor(GRAY_LIGHT)
-        c.setFont("Helvetica", 7)
+        c.setFont(FONT_REG, 7)
         c.drawString(3 * mm, self.height - 5 * mm, self.label.upper())
         c.setFillColor(NAVY)
-        c.setFont("Helvetica-Bold", 15)
+        c.setFont(FONT_BOLD, 15)
         c.drawString(3 * mm, self.height - 12 * mm, str(self.value))
         c.setFillColor(GRAY_LIGHT)
-        c.setFont("Helvetica", 7)
+        c.setFont(FONT_REG, 7)
         c.drawString(3 * mm, 2 * mm, self.sub)
 
 
@@ -197,10 +242,10 @@ class InsightBox(Flowable):
         c.setFillColor(self.cor)
         c.roundRect(0, 0, self.width, self.height, 2 * mm, fill=1, stroke=0)
         c.setFillColor(ORANGE)
-        c.setFont("Helvetica-Bold", 8)
+        c.setFont(FONT_BOLD, 8)
         c.drawString(4 * mm, self.height - 7 * mm, self.titulo.upper())
         c.setFillColor(WHITE)
-        c.setFont("Helvetica", 8)
+        c.setFont(FONT_REG, 8)
         y = self.height - 12.5 * mm
         for linha in self.linhas:
             c.drawString(4 * mm, y, str(linha))
@@ -232,7 +277,7 @@ class TagBadge(Flowable):
         c.setFillColor(self.cor)
         c.roundRect(0, 0.5 * mm, self.width, 4 * mm, 1 * mm, fill=1, stroke=0)
         c.setFillColor(WHITE)
-        c.setFont("Helvetica-Bold", 7)
+        c.setFont(FONT_BOLD, 7)
         c.drawCentredString(self.width / 2, 1.8 * mm, self.texto.upper())
 
 
@@ -421,11 +466,11 @@ def draw_footer(canvas, doc, cliente, total_pags):
     canvas.setFillColor(NAVY)
     canvas.rect(0, 0, W, 10 * mm, fill=1, stroke=0)
     canvas.setFillColor(WHITE)
-    canvas.setFont("Helvetica", 7)
+    canvas.setFont(FONT_REG, 7)
     canvas.drawString(MARGIN, 3 * mm, f"MarkSeg x {cliente.upper()}")
     canvas.drawCentredString(W / 2, 3 * mm, "MARKSEG · AGENCIA DE TRAFEGO")
     canvas.setFillColor(ORANGE)
-    canvas.setFont("Helvetica-Bold", 7)
+    canvas.setFont(FONT_BOLD, 7)
     canvas.drawRightString(W - MARGIN, 3 * mm,
                            f"PAG. {doc.page:02d} / {total_pags:02d}")
     canvas.restoreState()
@@ -455,23 +500,23 @@ def draw_cover(canvas, doc, titulo_doc, subtitulo_doc,
                              preserveAspectRatio=True, mask="auto")
         except Exception:
             canvas.setFillColor(NAVY)
-            canvas.setFont("Helvetica-Bold", 14)
+            canvas.setFont(FONT_BOLD, 14)
             canvas.drawString(MARGIN, H - 14 * mm, "MarkSeg")
     else:
         canvas.setFillColor(NAVY)
-        canvas.setFont("Helvetica-Bold", 14)
+        canvas.setFont(FONT_BOLD, 14)
         canvas.drawString(MARGIN, H - 14 * mm, "MarkSeg")
         canvas.setFillColor(ORANGE)
-        canvas.setFont("Helvetica-Bold", 9)
+        canvas.setFont(FONT_BOLD, 9)
         canvas.drawString(MARGIN, H - 21 * mm, "Agencia de Trafego")
 
     # tag direita (laranja) sobre fundo navy
     canvas.setFillColor(ORANGE)
     canvas.rect(W - 55 * mm, H - 28 * mm, 55 * mm, 28 * mm, fill=1, stroke=0)
     canvas.setFillColor(WHITE)
-    canvas.setFont("Helvetica-Bold", 8)
+    canvas.setFont(FONT_BOLD, 8)
     canvas.drawCentredString(W - 27 * mm, H - 10 * mm, titulo_doc.upper())
-    canvas.setFont("Helvetica", 7)
+    canvas.setFont(FONT_REG, 7)
     canvas.drawCentredString(W - 27 * mm, H - 16 * mm, agencia)
     canvas.drawCentredString(W - 27 * mm, H - 21 * mm, periodo)
 
@@ -485,18 +530,18 @@ def draw_cover(canvas, doc, titulo_doc, subtitulo_doc,
 
     # título principal
     canvas.setFillColor(NAVY)
-    canvas.setFont("Helvetica-Bold", 28)
+    canvas.setFont(FONT_BOLD, 28)
     canvas.drawString(MARGIN + 6 * mm, H - 55 * mm, titulo_doc)
     canvas.setFillColor(ORANGE)
-    canvas.setFont("Helvetica-Bold", 28)
+    canvas.setFont(FONT_BOLD, 28)
     canvas.drawString(MARGIN + 6 * mm, H - 69 * mm, subtitulo_doc)
     canvas.setFillColor(NAVY)
-    canvas.setFont("Helvetica-Bold", 18)
+    canvas.setFont(FONT_BOLD, 18)
     canvas.drawString(MARGIN + 6 * mm, H - 82 * mm, cliente + ".")
 
     # subtítulo descritivo
     canvas.setFillColor(GRAY_DARK)
-    canvas.setFont("Helvetica", 9)
+    canvas.setFont(FONT_REG, 9)
     canvas.drawString(MARGIN + 6 * mm, H - 92 * mm, info_extra)
 
     # cards de info
@@ -509,10 +554,10 @@ def draw_cover(canvas, doc, titulo_doc, subtitulo_doc,
         canvas.roundRect(x0, y0, bw - 3 * mm, 22 * mm, 2 * mm,
                           fill=1, stroke=0)
         canvas.setFillColor(ORANGE)
-        canvas.setFont("Helvetica-Bold", 7)
+        canvas.setFont(FONT_BOLD, 7)
         canvas.drawString(x0 + 3 * mm, y0 + 14 * mm, lbl)
         canvas.setFillColor(NAVY)
-        canvas.setFont("Helvetica-Bold", 9)
+        canvas.setFont(FONT_BOLD, 9)
         canvas.drawString(x0 + 3 * mm, y0 + 7 * mm, val)
 
     # caixa de resumo
@@ -521,24 +566,24 @@ def draw_cover(canvas, doc, titulo_doc, subtitulo_doc,
         canvas.roundRect(MARGIN, H - 178 * mm, W - 2 * MARGIN, 30 * mm,
                           2 * mm, fill=1, stroke=0)
         canvas.setFillColor(ORANGE)
-        canvas.setFont("Helvetica-Bold", 7)
+        canvas.setFont(FONT_BOLD, 7)
         canvas.drawString(MARGIN + 5 * mm, H - 153 * mm,
                            "RESUMO EXECUTIVO · EM UMA FRASE")
         canvas.setFillColor(WHITE)
-        canvas.setFont("Helvetica-Bold", 13)
+        canvas.setFont(FONT_BOLD, 13)
         canvas.drawString(MARGIN + 5 * mm, H - 163 * mm, frase_resumo)
         canvas.setFillColor(ORANGE)
-        canvas.setFont("Helvetica-Bold", 13)
+        canvas.setFont(FONT_BOLD, 13)
         canvas.drawString(MARGIN + 5 * mm, H - 174 * mm, frase_destaque)
 
     # rodapé
     canvas.setFillColor(NAVY)
     canvas.rect(0, 0, W, 10 * mm, fill=1, stroke=0)
     canvas.setFillColor(WHITE)
-    canvas.setFont("Helvetica", 7)
+    canvas.setFont(FONT_REG, 7)
     canvas.drawString(MARGIN, 3 * mm, f"MarkSeg x {cliente.upper()}")
     canvas.setFillColor(ORANGE)
-    canvas.setFont("Helvetica-Bold", 7)
+    canvas.setFont(FONT_BOLD, 7)
     canvas.drawRightString(W - MARGIN, 3 * mm, "PAG. 01")
 
     canvas.restoreState()
