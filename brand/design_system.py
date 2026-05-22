@@ -351,7 +351,8 @@ def chart_barras_horizontais(dados, largura_mm, altura_mm,
     label_w  = 55 * mm
     val_w    = 24 * mm
     bar_max  = largura_mm * mm - label_w - val_w - 4 * mm
-    max_v    = max(x[1] for x in dados) * 1.15 if dados else 1
+    max_v    = (max(x[1] for x in dados) * 1.15) if dados else 1
+    max_v    = max_v if max_v > 0 else 1
     for i, (rot, val, cor) in enumerate(dados):
         y = altura_mm * mm - th - (i + 1) * bar_tot + (bar_tot - bar_h) / 2
         d.add(String(4 * mm, y + bar_h / 2 - 3, rot,
@@ -426,7 +427,8 @@ def chart_barras_verticais_duplas(dados, largura_mm, altura_mm,
     ch     = top - bottom
     grp_w  = (largura_mm * mm - 8 * mm) / n
     bw     = grp_w * 0.3
-    max1   = max(x[1] for x in dados) * 1.2 if dados else 1
+    max1   = (max(x[1] for x in dados) * 1.2) if dados else 1
+    max1   = max1 if max1 > 0 else 1
     for i, item in enumerate(dados):
         rot = item[0]
         v1  = item[1]
