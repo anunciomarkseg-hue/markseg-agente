@@ -4,22 +4,75 @@ Lê CSVs do Meta Ads, Google Ads, planilhas e texto livre.
 """
 
 import re
+import math
 import pandas as pd
 
 
 # ── Utilitários ────────────────────────────────────────────────────────────
 
 def num(val, default=0.0):
-    """Converte valor para float, tolerando vírgula como decimal."""
+    """
+    Converte valor para float.
+    Suporta formato brasileiro (1.234,56), americano (1,234.56) e nan/None.
+    """
     try:
-        return float(str(val).replace("R$","").replace(".","").replace(",",".").strip())
+        # NaN nativo de Python/pandas
+        if val is None:
+            return default
+        if isinstance(val, float):
+            if math.isnan(val) or math.isinf(val):
+                return default
+            return val
+        if isinstance(val, int):
+            return float(val)
+
+        s = str(val).strip()
+        # strings vazias / nan textuais
+        if s.lower() in ("nan", "none", "", "-", "--", "n/a", "—"):
+            return default
+
+        # remove símbolos de moeda e espaços
+        s = re.sub(r"[R$\s]", "", s)
+        if not s:
+            return default
+
+        # detecta formato pelo último separador
+        dot_pos   = s.rfind(".")
+        comma_pos = s.rfind(",")
+
+        if comma_pos > dot_pos:
+            # formato BR: "1.234,56"  →  "1234.56"
+            s = s.replace(".", "").replace(",", ".")
+        elif dot_pos > comma_pos:
+            # formato US: "1,234.56"  →  "1234.56"
+            s = s.replace(",", "")
+        else:
+            # sem separador ou só vírgula sem ponto: trata vírgula como decimal
+            s = s.replace(",", ".")
+
+        result = float(s)
+        if math.isnan(result) or math.isinf(result):
+            return default
+        return result
     except Exception:
         return default
 
 
 def inteiro(val, default=0):
+    """Converte valor para int, tolerando NaN, vírgulas e pontos."""
     try:
-        return int(float(str(val).replace(".","").replace(",",".").strip()))
+        if val is None:
+            return default
+        if isinstance(val, float):
+            if math.isnan(val) or math.isinf(val):
+                return default
+            return int(val)
+        if isinstance(val, int):
+            return val
+        s = str(val).strip()
+        if s.lower() in ("nan", "none", "", "-", "--", "n/a", "—"):
+            return default
+        return int(num(s, default))
     except Exception:
         return default
 
@@ -27,22 +80,32 @@ def inteiro(val, default=0):
 def detectar_tipo_csv(df: pd.DataFrame) -> str:
     """Detecta se um DataFrame é de campanhas, conjuntos ou anúncios do Meta, ou Google Ads."""
     cols = [str(c).lower() for c in df.columns]
-    if any("nome da campanha" in c or "campaign" in c for c in cols):
-        if any("conjunto" in c or "ad set" in c for c in cols):
-            return "meta_conjuntos"
-        if any("nome do anúncio" in c or "ad name" in c for c in cols):
-            return "meta_anuncios"
-        return "meta_campanhas"
-    if any("conjunto de anúncios" in c or "ad set name" in c for c in cols):
-        return "meta_conjuntos"
-    if any("nome do anúncio" in c or "ad name" in c for c in cols):
+
+    tem_campanha  = any("nome da campanha" in c or "campaign name" in c for c in cols)
+    tem_conjunto  = any("nome do conjunto" in c or "ad set name" in c or
+                        "conjunto de anúncios" in c for c in cols)
+    tem_anuncio   = any("nome do anúncio" in c or "ad name" in c for c in cols)
+    tem_google    = any("keyword" in c or "palavra-chave" in c or
+                        "search term" in c or "termo de pesquisa" in c for c in cols)
+
+    # Meta Ads — prioridade pelo campo mais específico
+    if tem_anuncio:
         return "meta_anuncios"
-    if any("campanha" in c and "google" not in c for c in cols):
+    if tem_conjunto and not tem_campanha:
+        return "meta_conjuntos"
+    if tem_conjunto and tem_campanha:
+        return "meta_conjuntos"
+    if tem_campanha:
         return "meta_campanhas"
-    if any("keyword" in c or "palavra-chave" in c for c in cols):
+
+    # Google Ads
+    if tem_google:
         return "google_keywords"
-    if any("campaign" in c or "campanha" in c for c in cols):
+    if any("cliques" in c or "clicks" in c for c in cols):
         return "google_campanhas"
+    if any("campanha" in c or "campaign" in c for c in cols):
+        return "google_campanhas"
+
     return "desconhecido"
 
 
@@ -60,12 +123,13 @@ def col(df, *opcoes):
 def parse_meta_campanhas(df: pd.DataFrame) -> list:
     resultado = []
     nome_col    = col(df, "nome da campanha", "campaign name", "campanha")
-    gasto_col   = col(df, "valor usado", "amount spent", "gasto")
+    gasto_col   = col(df, "valor usado", "amount spent", "gasto", "verba")
     result_col  = col(df, "resultados", "results")
-    impr_col    = col(df, "impressões", "impressions")
+    impr_col    = col(df, "impressões", "impressions", "impressoes")
     alcance_col = col(df, "alcance", "reach")
-    cpl_col     = col(df, "custo por lead", "cost per lead", "custo por result")
-    leads_col   = col(df, "leads")
+    cpl_col     = col(df, "custo por resultado", "custo por lead", "cost per lead",
+                       "cost per result", "custo por result", "cpr")
+    leads_col   = col(df, "leads", "resultados", "results")
 
     for _, row in df.iterrows():
         nome = str(row.get(nome_col, "")) if nome_col else ""
@@ -84,13 +148,14 @@ def parse_meta_campanhas(df: pd.DataFrame) -> list:
 
 def parse_meta_conjuntos(df: pd.DataFrame) -> list:
     resultado = []
-    nome_col  = col(df, "nome do conjunto", "ad set name", "conjunto")
-    gasto_col = col(df, "valor usado", "amount spent")
+    nome_col  = col(df, "nome do conjunto", "ad set name", "conjunto de anúncios", "conjunto")
+    gasto_col = col(df, "valor usado", "amount spent", "gasto", "verba")
     leads_col = col(df, "resultados", "results", "leads")
-    cpl_col   = col(df, "custo por result", "custo por lead", "cost per")
-    orc_col   = col(df, "orçamento", "budget")
+    cpl_col   = col(df, "custo por resultado", "custo por result", "custo por lead",
+                      "cost per result", "cost per lead", "cost per")
+    orc_col   = col(df, "orçamento", "orcamento", "budget")
     alc_col   = col(df, "alcance", "reach")
-    stat_col  = col(df, "veiculação", "delivery", "status")
+    stat_col  = col(df, "veiculação", "veiculacao", "delivery", "status")
 
     for _, row in df.iterrows():
         nome = str(row.get(nome_col, "")) if nome_col else ""
@@ -111,12 +176,13 @@ def parse_meta_conjuntos(df: pd.DataFrame) -> list:
 
 def parse_meta_anuncios(df: pd.DataFrame) -> list:
     resultado = []
-    nome_col  = col(df, "nome do anúncio", "ad name", "anúncio")
-    gasto_col = col(df, "valor usado", "amount spent")
+    nome_col  = col(df, "nome do anúncio", "ad name", "anuncio", "anúncio")
+    gasto_col = col(df, "valor usado", "amount spent", "gasto", "verba")
     leads_col = col(df, "resultados", "results", "leads")
-    cpl_col   = col(df, "custo por lead", "custo por result", "cost per")
+    cpl_col   = col(df, "custo por resultado", "custo por lead", "custo por result",
+                      "cost per lead", "cost per result", "cost per")
     hook_col  = col(df, "hook rate")
-    stat_col  = col(df, "veiculação", "delivery", "status")
+    stat_col  = col(df, "veiculação", "veiculacao", "delivery", "status")
 
     for _, row in df.iterrows():
         nome = str(row.get(nome_col, "")) if nome_col else ""
@@ -150,12 +216,13 @@ def parse_meta_anuncios(df: pd.DataFrame) -> list:
 # ── Parsers Google Ads ─────────────────────────────────────────────────────
 
 def parse_google_campanhas(df: pd.DataFrame) -> dict:
-    gasto_col  = col(df, "custo", "cost", "valor")
+    gasto_col  = col(df, "custo", "cost", "valor gasto", "valor", "spend")
     cliq_col   = col(df, "cliques", "clicks")
-    impr_col   = col(df, "impr", "impressions")
+    impr_col   = col(df, "impressões", "impressoes", "impr", "impressions")
     ctr_col    = col(df, "ctr")
-    conv_col   = col(df, "conversões", "conversions")
-    cpc_col    = col(df, "cpc", "custo / conv", "cost/conv")
+    conv_col   = col(df, "conversões", "conversoes", "conversions", "conv.")
+    cpc_col    = col(df, "custo / conv", "cost / conv", "cpc médio", "avg. cpc",
+                       "cpc", "cost/conv")
 
     totais = {"gasto": 0, "cliques": 0, "impressoes": 0,
               "ctr": "0%", "conv": 0, "cpl": 0}

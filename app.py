@@ -4,7 +4,7 @@ Upload de arquivos + texto → PDF no padrão da agência.
 """
 
 import streamlit as st
-import os, sys, tempfile, json
+import os, sys, tempfile, json, io
 import pandas as pd
 from datetime import date
 
@@ -142,15 +142,54 @@ arquivos = st.file_uploader(
 )
 
 # preview dos arquivos
+def _ler_csv(arq) -> pd.DataFrame:
+    """Lê CSV detectando encoding (UTF-8 BOM, UTF-8, Latin-1) e separador (;  ,  \t)."""
+    raw = arq.read()
+    # tenta encodings comuns — Excel BR costuma salvar Latin-1
+    for enc in ("utf-8-sig", "utf-8", "latin-1", "cp1252"):
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        text = raw.decode("latin-1", errors="replace")
+
+    # detecta separador pela primeira linha
+    first = text.split("\n")[0]
+    n_semi  = first.count(";")
+    n_comma = first.count(",")
+    n_tab   = first.count("\t")
+    if n_semi >= n_comma and n_semi >= n_tab:
+        sep = ";"
+    elif n_tab >= n_comma:
+        sep = "\t"
+    else:
+        sep = ","
+
+    try:
+        df = pd.read_csv(io.StringIO(text), sep=sep, on_bad_lines="skip")
+        # se só 1 coluna, tenta auto-detect
+        if len(df.columns) <= 1:
+            df = pd.read_csv(io.StringIO(text), sep=None, engine="python",
+                             on_bad_lines="skip")
+    except Exception:
+        df = pd.read_csv(io.StringIO(text), sep=None, engine="python",
+                         on_bad_lines="skip")
+    return df
+
+
 dfs = {}
 textos_extras = []
 if arquivos:
     for arq in arquivos:
         try:
             if arq.name.endswith(".csv"):
-                df = pd.read_csv(arq, sep=None, engine="python", on_bad_lines="skip")
+                df = _ler_csv(arq)
                 dfs[arq.name] = df
-                with st.expander(f"📄 {arq.name}", expanded=False):
+                from parsers import detectar_tipo_csv
+                tipo_detectado = detectar_tipo_csv(df)
+                with st.expander(f"📄 {arq.name}  ·  {df.shape[0]} linhas  ·  tipo: {tipo_detectado}", expanded=False):
                     st.dataframe(df, use_container_width=True, height=200)
             elif arq.name.endswith((".xlsx", ".xls")):
                 df = pd.read_excel(arq)
