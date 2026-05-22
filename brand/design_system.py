@@ -415,6 +415,7 @@ def chart_barras_horizontais(dados, largura_mm, altura_mm,
 def chart_donut(dados, largura_mm, altura_mm, titulo=None):
     """
     dados: lista de (rótulo, valor, cor)
+    Donut à esquerda; legenda em linha única à direita (não sobrepõe).
     """
     d = Drawing(largura_mm * mm, altura_mm * mm)
     d.add(Rect(0, 0, largura_mm * mm, altura_mm * mm,
@@ -422,39 +423,57 @@ def chart_donut(dados, largura_mm, altura_mm, titulo=None):
     if titulo:
         d.add(String(4 * mm, altura_mm * mm - 5 * mm, titulo.upper(),
                      fontName="Helvetica-Bold", fontSize=8, fillColor=ORANGE))
+
     total = sum(x[1] for x in dados) or 1
-    cy  = altura_mm * mm / 2 - 2 * mm
-    cx  = (altura_mm - 14) * mm / 2 + 4 * mm
-    r_o = (altura_mm - 14) * mm / 2
-    r_i = r_o * 0.6
+
+    # ── Donut (ocupa ~25% da largura, centrado verticalmente) ─────────────
+    donut_w = min(largura_mm * 0.28, altura_mm - 10) * mm
+    r_o     = donut_w / 2
+    r_i     = r_o * 0.55
+    cy      = altura_mm * mm / 2 - 2 * mm
+    cx      = 4 * mm + r_o
+
     start = 90
     for rot, val, cor in dados:
         sweep = -(val / total) * 360
-        # Wedge com ângulo 0 ou ±360 causa ZeroDivisionError no ReportLab
         if abs(sweep) < 0.5 or abs(abs(sweep) - 360) < 0.5:
             start += sweep
             continue
         d.add(Wedge(cx, cy, r_o, start + sweep, start,
                     fillColor=cor, strokeColor=WHITE, strokeWidth=1.5))
         start += sweep
+
     d.add(Circle(cx, cy, r_i, fillColor=GRAY_BG, strokeColor=None))
     d.add(String(cx, cy + 2, "TOTAL",
                  fontName="Helvetica", fontSize=6, fillColor=GRAY_LIGHT,
                  textAnchor="middle"))
-    d.add(String(cx, cy - 6, f"R$ {total:,.0f}".replace(",", "."),
-                 fontName="Helvetica-Bold", fontSize=10, fillColor=NAVY,
+    d.add(String(cx, cy - 7, f"R$ {total:,.0f}".replace(",", "."),
+                 fontName="Helvetica-Bold", fontSize=9, fillColor=NAVY,
                  textAnchor="middle"))
+
+    # ── Legenda: uma linha por item (label bold + valor) ──────────────────
+    # Espaço disponível para a legenda: da borda direita do donut até a borda direita
     lx = cx + r_o + 8 * mm
-    ly = altura_mm * mm - 14 * mm
-    for rot, val, cor in dados:
-        pct = val / total * 100
-        d.add(Rect(lx, ly, 3 * mm, 3 * mm, fillColor=cor, strokeColor=None))
-        d.add(String(lx + 5 * mm, ly + 0.5, rot,
+    leg_w = largura_mm * mm - lx - 4 * mm   # largura disponível para texto
+
+    n_items   = len(dados)
+    item_h    = min(12 * mm, (altura_mm * mm - 14 * mm) / max(n_items, 1))
+    ly_start  = cy + item_h * (n_items - 1) / 2   # centraliza verticalmente
+
+    for i, (rot, val, cor) in enumerate(dados):
+        pct  = val / total * 100
+        ly   = ly_start - i * item_h
+        # quadrado colorido
+        d.add(Rect(lx, ly, 3.5 * mm, 3.5 * mm, fillColor=cor, strokeColor=None))
+        # nome em bold
+        d.add(String(lx + 5 * mm, ly + 1,
+                     rot[:28],
                      fontName="Helvetica-Bold", fontSize=8, fillColor=NAVY))
-        d.add(String(lx + 5 * mm, ly - 4,
-                     f"R$ {val:,.2f} ({pct:.0f}%)".replace(",", "."),
+        # valor na linha abaixo
+        d.add(String(lx + 5 * mm, ly - 5,
+                     f"R$ {val:,.2f}  ({pct:.0f}%)".replace(",", "."),
                      fontName="Helvetica", fontSize=7, fillColor=GRAY_DARK))
-        ly -= 10 * mm
+
     return d
 
 
@@ -471,13 +490,15 @@ def chart_barras_verticais_duplas(dados, largura_mm, altura_mm,
         d.add(String(4 * mm, altura_mm * mm - 5 * mm, titulo.upper(),
                      fontName="Helvetica-Bold", fontSize=8, fillColor=ORANGE))
     n = len(dados)
-    bottom = 14 * mm
+    bottom = 18 * mm   # espaço extra para rótulos do eixo X
     top    = altura_mm * mm - 10 * mm
     ch     = top - bottom
     grp_w  = (largura_mm * mm - 8 * mm) / n
     bw     = grp_w * 0.3
     max1   = (max(x[1] for x in dados) * 1.2) if dados else 1
     max1   = max1 if max1 > 0 else 1
+    # chars máx por label proporcional à largura do grupo
+    max_chars = max(8, int(grp_w / mm / 3.5))
     for i, item in enumerate(dados):
         rot = item[0]
         v1  = item[1]
@@ -487,16 +508,18 @@ def chart_barras_verticais_duplas(dados, largura_mm, altura_mm,
         x1  = cx - bw - 1 * mm
         d.add(Rect(x1, bottom, bw, h1, fillColor=cor1, strokeColor=None))
         d.add(String(x1 + bw / 2, bottom + h1 + 2, str(v1),
-                     fontName="Helvetica-Bold", fontSize=8,
+                     fontName="Helvetica-Bold", fontSize=7,
                      fillColor=NAVY, textAnchor="middle"))
         if v2s:
             d.add(Rect(cx + 1 * mm, bottom, bw, h1 * 0.6,
                        fillColor=cor2, strokeColor=None))
             d.add(String(cx + 1 * mm + bw / 2, bottom + h1 * 0.6 + 2, v2s,
-                         fontName="Helvetica-Bold", fontSize=8,
+                         fontName="Helvetica-Bold", fontSize=7,
                          fillColor=NAVY, textAnchor="middle"))
-        d.add(String(cx, bottom - 5, rot,
-                     fontName="Helvetica-Bold", fontSize=8,
+        # trunca no pipe (se houver) e depois no max_chars
+        label = rot.split("|")[0].strip()[:max_chars]
+        d.add(String(cx, bottom - 12, label,
+                     fontName="Helvetica", fontSize=6.5,
                      fillColor=NAVY, textAnchor="middle"))
     # legenda
     lx = largura_mm * mm - 55 * mm

@@ -145,7 +145,7 @@ def gerar(dados: dict, output_path: str):
     for camp in campanhas_ativas:
         etapa_cor = etapa_cores.get(camp.get("etapa", "FUNDO").upper(), NAVY)
         funil_rows.append([
-            TagBadge(camp.get("etapa", ""), etapa_cor),
+            TagBadge(camp.get("etapa", ""), etapa_cor, largura=20*mm),
             Paragraph(camp.get("nome", ""), S["td"]),
             Paragraph(f"R$ {camp.get('verba', 0):,.2f}".replace(",","."), S["td_r"]),
             Paragraph(camp.get("resultado", ""), S["td"]),
@@ -162,8 +162,8 @@ def gerar(dados: dict, output_path: str):
         Paragraph(f"{total_imp:,}".replace(",","."), S["th"]),
     ])
 
-    # ETAPA(16) + CAMPANHA(64) + VERBA(22) + RESULTADO(30) + CPR(22) + IMP.(16) = 170
-    funil_cols = [16*mm, 64*mm, 22*mm, 30*mm, 22*mm, 16*mm]
+    # ETAPA(22) + CAMPANHA(58) + VERBA(22) + RESULTADO(30) + CPR(22) + IMP.(16) = 170
+    funil_cols = [22*mm, 58*mm, 22*mm, 30*mm, 22*mm, 16*mm]
     ft = Table(funil_rows, colWidths=funil_cols, repeatRows=1)
     ft.setStyle(table_style_default())
     ft.setStyle(table_total_row(len(funil_rows) - 1))
