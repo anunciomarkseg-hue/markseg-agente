@@ -44,6 +44,32 @@ _FONTS_BOLD = [
     "C:/Windows/Fonts/calibrib.ttf",
 ]
 
+def _find_system_fonts():
+    """Varre diretórios comuns de fontes e retorna pares (regular, bold)."""
+    import glob
+    dirs = [
+        "/usr/share/fonts/truetype",
+        "/usr/share/fonts",
+        "/usr/local/share/fonts",
+        "/System/Library/Fonts",
+        "/Library/Fonts",
+        "C:/Windows/Fonts",
+    ]
+    reg_candidates, bold_candidates = [], []
+    for d in dirs:
+        for ttf in glob.glob(os.path.join(d, "**", "*.ttf"), recursive=True):
+            low = ttf.lower()
+            base = os.path.basename(low)
+            # rejeita narrow, italic, oblique, condensed, black
+            if any(x in low for x in ("italic", "oblique", "narrow", "condensed")):
+                continue
+            if "bold" in low or "bd." in low or "-b." in low or "heavy" in low:
+                bold_candidates.append(ttf)
+            else:
+                reg_candidates.append(ttf)
+    return reg_candidates, bold_candidates
+
+
 def _try_register(name, paths):
     for p in paths:
         if os.path.exists(p):
@@ -54,7 +80,26 @@ def _try_register(name, paths):
                 continue
     return False
 
-_has_unicode = _try_register("MKS", _FONTS_REG) and _try_register("MKS-Bold", _FONTS_BOLD)
+
+def _register_unicode_fonts():
+    """Registra fontes Unicode com suporte a PT/BR. Fallback para busca ampla."""
+    # 1) tenta paths conhecidos primeiro
+    ok_reg  = _try_register("MKS",      _FONTS_REG)
+    ok_bold = _try_register("MKS-Bold", _FONTS_BOLD)
+    if ok_reg and ok_bold:
+        return True
+
+    # 2) busca ampla no sistema
+    reg_list, bold_list = _find_system_fonts()
+    if not ok_reg:
+        ok_reg  = _try_register("MKS",      reg_list)
+    if not ok_bold:
+        ok_bold = _try_register("MKS-Bold", bold_list if bold_list else reg_list)
+
+    return ok_reg  # aceitamos mesmo sem bold (reportlab usará regular como fallback)
+
+
+_has_unicode = _register_unicode_fonts()
 
 FONT_REG  = "MKS"      if _has_unicode else "Helvetica"
 FONT_BOLD = "MKS-Bold" if _has_unicode else "Helvetica-Bold"

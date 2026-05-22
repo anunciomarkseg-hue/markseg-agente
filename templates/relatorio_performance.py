@@ -284,7 +284,31 @@ def gerar(dados: dict, output_path: str):
     if d.get("insights_google"):
         story.append(InsightBox("GOOGLE · ANALISE", d["insights_google"],
                                 cor=NAVY))
-        story.append(Spacer(1, 5 * mm))
+        story.append(Spacer(1, 4 * mm))
+
+    # top palavras-chave
+    kw_top = d.get("google_kw_top", [])
+    if kw_top:
+        story.append(SectionHeader(5, "GOOGLE · TOP PALAVRAS-CHAVE POR GASTO"))
+        story.append(Spacer(1, 3 * mm))
+        kw_rows = [[
+            Paragraph("PALAVRA-CHAVE / TERMO", S["th"]),
+            Paragraph("CLIQUES", S["th"]),
+            Paragraph("GASTO", S["th"]),
+            Paragraph("CONV.", S["th"]),
+        ]]
+        for kw in kw_top:
+            kw_rows.append([
+                Paragraph(kw.get("kw", ""), S["td"]),
+                Paragraph(str(kw.get("cliques", 0)), S["td_r"]),
+                Paragraph(f"R$ {kw.get('gasto', 0):.2f}", S["td_r"]),
+                Paragraph(str(kw.get("conv", 0)), S["td_r"]),
+            ])
+        kw_t = Table(kw_rows, colWidths=[100*mm, 22*mm, 28*mm, 22*mm],
+                     repeatRows=1)
+        kw_t.setStyle(table_style_default())
+        story.append(kw_t)
+        story.append(Spacer(1, 4 * mm))
 
     # seção 5 – seguidores
     if d.get("estrategia_seguidores"):

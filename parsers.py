@@ -304,6 +304,36 @@ def parse_meta_anuncios(df: pd.DataFrame) -> list:
 
 # ── Parsers Google Ads ─────────────────────────────────────────────────────
 
+def parse_google_keywords_top(df: pd.DataFrame, top_n: int = 5) -> list:
+    """Retorna top N palavras-chave/termos por gasto, com cliques e conversões."""
+    kw_col    = col(df, "palavra-chave", "termo de pesquisa", "keyword", "search term")
+    gasto_col = col(df, "custo", "cost")
+    cliq_col  = col(df, "cliques", "clicks")
+    conv_col  = col(df, "conversões", "conversoes", "conversions")
+    camp_col  = col(df, "campanha", "campaign")
+
+    if not kw_col or not gasto_col:
+        return []
+
+    rows = []
+    for _, row in df.iterrows():
+        if _is_total_row(row.to_dict()):
+            continue
+        kw    = str(row.get(kw_col, "")).strip().strip('"')
+        gasto = num(row.get(gasto_col, 0))
+        cliq  = inteiro(row.get(cliq_col, 0))
+        conv  = inteiro(row.get(conv_col, 0))
+        if not kw or kw.lower() in ("nan", "", " --", "--") or gasto == 0:
+            continue
+        camp = str(row.get(camp_col, "")) if camp_col else ""
+        rows.append({"kw": kw[:55], "gasto": gasto, "cliques": cliq,
+                     "conv": conv, "campanha": camp[:35]})
+
+    # ordena por gasto desc, pega top N
+    rows.sort(key=lambda x: x["gasto"], reverse=True)
+    return rows[:top_n]
+
+
 def parse_google_campanhas(df: pd.DataFrame) -> dict:
     """
     Agrega métricas de qualquer relatório Google Ads (campanhas, palavras-chave,
@@ -379,6 +409,170 @@ def parse_google_campanhas(df: pd.DataFrame) -> dict:
 
     totais["conv"] = int(round(conv_f))
     return totais
+
+
+# ── Análise inteligente automática (sem API, baseada em regras de negócio) ──
+
+def _analisar_performance(meta_camp, meta_conj, meta_anun,
+                          google, periodo: str, cliente: str) -> dict:
+    """
+    Lê os dados parseados e gera:
+    - resumo_executivo: 2-3 frases sobre o período
+    - insights_meta: lista de observações Meta
+    - insights_google: lista de observações Google
+    - proximos_passos: lista de ações recomendadas
+    - frase_resumo / frase_destaque: para a capa
+    """
+    meta_gasto  = sum(c["gasto"] for c in meta_camp)
+    meta_leads  = sum(c["leads"] for c in meta_camp)
+    meta_pv     = sum(c.get("page_views", 0) for c in meta_camp)
+    meta_impr   = sum(c.get("impressoes", 0) for c in meta_camp)
+    meta_cpl    = round(meta_gasto / meta_leads, 2) if meta_leads else 0
+
+    g_gasto  = google.get("gasto", 0)
+    g_cliq   = google.get("cliques", 0)
+    g_impr   = google.get("impressoes", 0)
+    g_conv   = google.get("conv", 0)
+    g_cpl    = google.get("cpl", 0)
+    g_ctr    = google.get("ctr", "0%")
+
+    total_inv   = meta_gasto + g_gasto
+    total_leads = meta_leads + g_conv
+
+    # ── Fase da campanha ────────────────────────────────────────────────────
+    camp_ativas = [c for c in meta_camp if c.get("ativo", True)]
+    if total_leads == 0 and total_inv > 0:
+        fase = "aprendizado"
+    elif total_leads > 0 and meta_cpl > 80:
+        fase = "otimização"
+    else:
+        fase = "escala"
+
+    # ── Insights Meta ───────────────────────────────────────────────────────
+    ins_meta = []
+
+    if meta_leads > 0:
+        ins_meta.append(
+            f"{meta_leads} lead{'s' if meta_leads > 1 else ''} captado{'s' if meta_leads > 1 else ''} "
+            f"via Meta · CPL médio R$ {meta_cpl:.2f}"
+        )
+    elif meta_pv > 0:
+        cpc_pv = round(meta_gasto / meta_pv, 2) if meta_pv else 0
+        ins_meta.append(
+            f"Fase de topo de funil: {meta_pv:,} visitas geradas · "
+            f"custo/visita R$ {cpc_pv:.4f} · leads ainda em construção"
+        )
+
+    # melhor conjunto
+    conj_leads = [c for c in meta_conj if c.get("leads", 0) > 0]
+    if conj_leads:
+        melhor = min(conj_leads, key=lambda x: x["cpl"])
+        ins_meta.append(
+            f"Melhor conjunto: '{melhor['nome'][:45]}' · "
+            f"CPL R$ {melhor['cpl']:.2f} · {melhor['leads']} leads"
+        )
+
+    # vencedor criativo
+    venc = next((c for c in meta_anun if c.get("avaliacao") == "VENCEDOR"), None)
+    dest = next((c for c in meta_anun if c.get("avaliacao") == "DESTAQUE"), None)
+    if venc:
+        ins_meta.append(
+            f"Criativo vencedor: '{venc['nome'][:40]}' · "
+            f"R$ {venc['gasto']:.2f} · {venc['leads']} leads · CPL R$ {venc['cpl']:.2f}"
+        )
+    elif dest:
+        ins_meta.append(
+            f"Criativo destaque: '{dest['nome'][:40]}' · "
+            f"R$ {dest['gasto']:.2f} · {dest.get('page_views', 0):,} visitas"
+        )
+
+    # alerta de CPL alto
+    if meta_leads > 0 and meta_cpl > 100:
+        ins_meta.append(
+            f"⚠ CPL acima do alvo (R$ {meta_cpl:.2f}) · "
+            f"revisar segmentação e criativos antes de escalar"
+        )
+
+    # campanhas pausadas
+    pausadas = [c for c in meta_camp if not c.get("ativo", True)]
+    if pausadas:
+        ins_meta.append(
+            f"{len(pausadas)} campanha{'s' if len(pausadas) > 1 else ''} "
+            f"inativa{'s' if len(pausadas) > 1 else ''} no período"
+        )
+
+    # ── Insights Google ─────────────────────────────────────────────────────
+    ins_google = []
+    if g_cliq > 0:
+        ins_google.append(
+            f"R$ {g_gasto:.2f} investidos · {g_cliq} cliques · {g_impr:,} impressões · CTR {g_ctr}"
+        )
+    if g_conv > 0:
+        ins_google.append(
+            f"{g_conv} conversão{'ões' if g_conv > 1 else ''} registrada{'s' if g_conv > 1 else ''} "
+            f"· CPL R$ {g_cpl:.2f}"
+        )
+    elif g_cliq > 0:
+        ins_google.append(
+            "Fase de aprendizado do Google · sem conversões registradas ainda "
+            "(pode levar 7-14 dias para o algoritmo calibrar)"
+        )
+
+    camps_g = [c for c in google.get("campanhas", []) if c["gasto"] > 0]
+    if camps_g:
+        top = max(camps_g, key=lambda x: x["gasto"])
+        ins_google.append(
+            f"Campanha principal: '{top['nome'][:50]}' · "
+            f"R$ {top['gasto']:.2f} · {top['cliques']} cliques"
+        )
+
+    # ── Próximos passos automáticos ─────────────────────────────────────────
+    proximos = []
+    if venc and venc.get("leads", 0) > 0:
+        proximos.append({
+            "acao": f"Escalar orçamento do criativo '{venc['nome'][:35]}'",
+            "responsavel": "Rafael", "prazo": "3 dias",
+            "impacto": "Aumentar volume de leads mantendo CPL",
+        })
+    if meta_leads == 0 and meta_gasto > 0:
+        proximos.append({
+            "acao": "Ativar campanha de fundo de funil (leads diretos)",
+            "responsavel": "Rafael", "prazo": "Esta semana",
+            "impacto": "Começar a capturar leads qualificados",
+        })
+    if g_conv == 0 and g_cliq > 0:
+        proximos.append({
+            "acao": "Verificar tracking de conversão Google (GA4 + GTM)",
+            "responsavel": "Rafael / Cliente", "prazo": "Urgente",
+            "impacto": "Dados de conversão precisos para otimização",
+        })
+    if fase == "otimização":
+        proximos.append({
+            "acao": "Testar novo criativo para reduzir CPL",
+            "responsavel": "Rafael", "prazo": "7 dias",
+            "impacto": f"CPL atual R$ {meta_cpl:.2f} · meta abaixo de R$ 60",
+        })
+
+    # ── Frases da capa ──────────────────────────────────────────────────────
+    if total_leads > 0:
+        cpl_g = round(total_inv / total_leads, 2)
+        frase_r = f"{total_leads} leads gerados · R$ {total_inv:.2f} investidos"
+        frase_d = f"CPL médio R$ {cpl_g:.2f} · Meta + Google · {periodo}"
+    elif meta_pv > 0:
+        frase_r = f"{meta_pv:,} visitas geradas · R$ {total_inv:.2f} investidos"
+        frase_d = f"Fase de construção de audiência · {periodo}"
+    else:
+        frase_r = f"R$ {total_inv:.2f} investidos no período · {periodo}"
+        frase_d = "Dados em processamento · próxima atualização em breve"
+
+    return {
+        "insights_meta":    ins_meta,
+        "insights_google":  ins_google,
+        "proximos_passos":  proximos,
+        "frase_resumo":     frase_r,
+        "frase_destaque":   frase_d,
+        "fase":             fase,
+    }
 
 
 # ── Extrai dados do texto livre ────────────────────────────────────────────
@@ -608,6 +802,7 @@ def montar_dados(tipo, cliente, periodo, responsavel,
     meta_conj_raw  = []
     meta_anun_raw  = []
     google_raw     = {}
+    google_kw_top  = []
 
     for nome_arq, df in dfs.items():
         tipo_csv = detectar_tipo_csv(df)
@@ -618,12 +813,13 @@ def montar_dados(tipo, cliente, periodo, responsavel,
         elif tipo_csv == "meta_anuncios":
             meta_anun_raw.extend(parse_meta_anuncios(df))
         elif tipo_csv in ("google_campanhas", "google_keywords", "google_termos"):
-            # agrega — usa o que já tem mais dados (mais gasto/cliques)
             novo = parse_google_campanhas(df)
-            if novo.get("gasto", 0) > google_raw.get("gasto", 0):
+            # usa o arquivo com mais gasto (evita double-count acumulando)
+            if novo.get("gasto", 0) >= google_raw.get("gasto", 0):
                 google_raw = novo
-            elif novo.get("cliques", 0) > google_raw.get("cliques", 0):
-                google_raw = novo
+            # top keywords de qualquer arquivo com coluna de palavra-chave/termo
+            if tipo_csv in ("google_keywords", "google_termos") and not google_kw_top:
+                google_kw_top = parse_google_keywords_top(df, top_n=5)
 
     # ── Relatório de Performance ──────────────────────────────────────────
     if tipo == "relatorio_performance":
@@ -660,88 +856,54 @@ def montar_dados(tipo, cliente, periodo, responsavel,
         meta_leads = sum(c["leads"] for c in meta_camp_raw)
         meta_cpl   = round(meta_total / meta_leads, 2) if meta_leads else 0
 
-        # ── Insights automáticos ──────────────────────────────────────────
-        insights_meta = list(linhas_livres[:3])  # prioriza texto do usuário
+        # ── Top 5 criativos (leads primeiro, depois por gasto) ────────────
+        cri_com_lead = sorted(
+            [c for c in meta_anun_raw if c.get("leads", 0) > 0],
+            key=lambda x: (x["leads"], -x["cpl"]), reverse=True
+        )
+        cri_sem_lead = sorted(
+            [c for c in meta_anun_raw if c.get("leads", 0) == 0 and c.get("gasto", 0) > 0],
+            key=lambda x: x["gasto"], reverse=True
+        )
+        top5_criativos = (cri_com_lead + cri_sem_lead)[:5]
 
-        # top criativo
-        vencedor = next((c for c in meta_anun_raw if c.get("destaque")), None)
-        if vencedor and not insights_meta:
-            insights_meta.append(
-                f"Criativo '{vencedor['nome']}' {"vencedor" if vencedor.get('leads',0) > 0 else "destaque"}"
-                f" · R$ {vencedor['gasto']:.2f} gastos · "
-                f"{vencedor['leads']} leads" if vencedor.get('leads', 0) > 0
-                else f" · {vencedor.get('page_views', 0):,} visitas"
-            )
-        # conjunto com melhor CPL
-        conj_com_lead = [c for c in meta_conj_raw if c.get("leads", 0) > 0]
-        if conj_com_lead:
-            melhor_conj = min(conj_com_lead, key=lambda x: x["cpl"])
-            insights_meta.append(
-                f"Conjunto '{melhor_conj['nome'][:40]}' · CPL R$ {melhor_conj['cpl']:.2f} "
-                f"· {melhor_conj['leads']} leads"
-            )
-        # alerta se sem leads
-        if meta_leads == 0 and meta_total > 0:
-            total_pv = sum(c.get("page_views", 0) for c in meta_camp_raw)
-            insights_meta.append(
-                f"Semana de topo de funil: {total_pv:,} visitas geradas · "
-                f"R$ {meta_total:.2f} investidos · nenhuma conversão direta"
-            )
+        # ── Análise automática inteligente ────────────────────────────────
+        analise = _analisar_performance(
+            meta_camp_raw, meta_conj_raw, meta_anun_raw,
+            google_raw, dados["periodo"], dados["cliente"]
+        )
+        # texto do usuário tem prioridade sobre análise automática
+        insights_meta   = linhas_livres[:2] + analise["insights_meta"] if linhas_livres \
+                          else analise["insights_meta"]
+        insights_google = analise["insights_google"]
+        proximos        = analise["proximos_passos"]
 
-        # insights Google
         g = google_raw
-        insights_google = []
-        if g.get("cliques", 0) > 0:
-            insights_google.append(
-                f"R$ {g['gasto']:.2f} investidos · {g['cliques']} cliques · "
-                f"CTR {g['ctr']}"
-            )
-        if g.get("conv", 0) > 0:
-            insights_google.append(
-                f"{g['conv']} conversões geradas · CPL médio R$ {g['cpl']:.2f}"
-            )
-        # campanha com mais gasto
-        camps_g = g.get("campanhas", [])
-        if camps_g:
-            top_camp = max(camps_g, key=lambda x: x["gasto"])
-            if top_camp["gasto"] > 0:
-                insights_google.append(
-                    f"Campanha principal: '{top_camp['nome'][:45]}' · "
-                    f"R$ {top_camp['gasto']:.2f} · {top_camp['cliques']} cliques"
-                )
-
         dados.update({
             "meta_campanhas": campanhas_template,
             "meta_total":     meta_total,
             "meta_leads":     meta_leads,
             "meta_cpl":       meta_cpl,
-            "criativos":      meta_anun_raw,
-            "conjuntos":      meta_conj_raw,
+            "criativos":      top5_criativos,
+            "conjuntos":      meta_conj_raw[:8],  # máx 8 conjuntos
             "google_gasto":      g.get("gasto", 0),
             "google_cliques":    g.get("cliques", 0),
             "google_impressoes": g.get("impressoes", 0),
             "google_ctr":        g.get("ctr", "0%"),
             "google_conv":       g.get("conv", 0),
             "google_cpl":        g.get("cpl", 0),
-            "insights_criativos": insights_meta,
+            "google_kw_top":     google_kw_top,
+            "insights_criativos": insights_meta[:5],
             "insights_google":    insights_google,
             "sugestoes_conteudo": [],
             "estrategia_seguidores": [],
-            "proximos_passos": [],
+            "proximos_passos": proximos,
         })
 
-        # frase automática na capa
+        # frases da capa (texto do usuário ou análise automática)
         if not dados["frase_resumo"]:
-            total_inv = meta_total + g.get("gasto", 0)
-            total_leads = meta_leads + g.get("conv", 0)
-            if total_leads > 0:
-                cpl_geral = round(total_inv / total_leads, 2) if total_leads else 0
-                dados["frase_resumo"]   = f"{total_leads} leads gerados · CPL médio R$ {cpl_geral:.2f}"
-                dados["frase_destaque"] = f"Total investido R$ {total_inv:.2f} · Meta + Google"
-            elif meta_total > 0:
-                total_pv = sum(c.get("page_views", 0) for c in meta_camp_raw)
-                dados["frase_resumo"]   = f"R$ {total_inv:.2f} investidos · {total_pv:,} visitas geradas"
-                dados["frase_destaque"] = f"Fase de aprendizado · conversões em construção"
+            dados["frase_resumo"]   = analise["frase_resumo"]
+            dados["frase_destaque"] = analise["frase_destaque"]
 
     # ── Relatório Social ──────────────────────────────────────────────────
     elif tipo == "relatorio_social":
