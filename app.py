@@ -143,9 +143,13 @@ arquivos = st.file_uploader(
 
 # preview dos arquivos
 def _ler_csv(arq) -> pd.DataFrame:
-    """Lê CSV detectando encoding (UTF-8 BOM, UTF-8, Latin-1) e separador (;  ,  \t)."""
+    """
+    Lê CSV detectando:
+    - Encoding (UTF-8 BOM, UTF-8, Latin-1, cp1252)
+    - Separador (;  ,  tab)
+    - Linhas de preâmbulo (Google Ads exporta 2 linhas de título antes do cabeçalho)
+    """
     raw = arq.read()
-    # tenta encodings comuns — Excel BR costuma salvar Latin-1
     for enc in ("utf-8-sig", "utf-8", "latin-1", "cp1252"):
         try:
             text = raw.decode(enc)
@@ -155,11 +159,31 @@ def _ler_csv(arq) -> pd.DataFrame:
     else:
         text = raw.decode("latin-1", errors="replace")
 
-    # detecta separador pela primeira linha
-    first = text.split("\n")[0]
-    n_semi  = first.count(";")
-    n_comma = first.count(",")
-    n_tab   = first.count("\t")
+    all_lines = text.split("\n")
+    data_lines = [l for l in all_lines if l.strip()]
+
+    if not data_lines:
+        return pd.DataFrame()
+
+    # ── Detecta preâmbulo (Google Ads: título + data antes do header real) ──
+    # Conta separadores em cada linha para encontrar onde começa o header real
+    def count_seps(line):
+        return max(line.count(","), line.count(";"), line.count("\t"))
+
+    sep_counts = [count_seps(l) for l in data_lines[:5]]
+    max_seps = max(sep_counts) if sep_counts else 0
+
+    skip_rows = 0
+    for idx, cnt in enumerate(sep_counts):
+        if cnt >= max_seps * 0.6:   # esta linha parece o header real
+            skip_rows = idx
+            break
+
+    # ── Detecta separador a partir da linha do header ──────────────────────
+    hdr = data_lines[skip_rows] if skip_rows < len(data_lines) else data_lines[0]
+    n_semi  = hdr.count(";")
+    n_comma = hdr.count(",")
+    n_tab   = hdr.count("\t")
     if n_semi >= n_comma and n_semi >= n_tab:
         sep = ";"
     elif n_tab >= n_comma:
@@ -168,14 +192,18 @@ def _ler_csv(arq) -> pd.DataFrame:
         sep = ","
 
     try:
-        df = pd.read_csv(io.StringIO(text), sep=sep, on_bad_lines="skip")
-        # se só 1 coluna, tenta auto-detect
+        df = pd.read_csv(io.StringIO(text), sep=sep,
+                         skiprows=skip_rows, on_bad_lines="skip")
         if len(df.columns) <= 1:
             df = pd.read_csv(io.StringIO(text), sep=None, engine="python",
-                             on_bad_lines="skip")
+                             skiprows=skip_rows, on_bad_lines="skip")
     except Exception:
-        df = pd.read_csv(io.StringIO(text), sep=None, engine="python",
-                         on_bad_lines="skip")
+        try:
+            df = pd.read_csv(io.StringIO(text), sep=None, engine="python",
+                             skiprows=skip_rows, on_bad_lines="skip")
+        except Exception:
+            df = pd.DataFrame()
+
     return df
 
 
