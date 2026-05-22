@@ -99,7 +99,7 @@ def gerar(dados: dict, output_path: str):
     story.append(Spacer(1, 4 * mm))
 
     # seção 1 – visão geral meta
-    story.append(SectionHeader(1, "META ADS · VISAO GERAL DA SEMANA"))
+    story.append(SectionHeader(1, "META ADS · VISÃO GERAL DA SEMANA"))
     story.append(Spacer(1, 4 * mm))
 
     meta_total  = d.get("meta_total", 0)
@@ -113,7 +113,7 @@ def gerar(dados: dict, output_path: str):
          "sub": "total 7 dias",        "cor": ORANGE},
         {"label": "LEADS GERADOS",     "value": str(meta_leads),
          "sub": "campanha fundo",      "cor": ORANGE},
-        {"label": "CPL MEDIO FUNDO",   "value": f"R$ {meta_cpl:,.2f}".replace(",","."),
+        {"label": "CPL MÉDIO FUNDO",   "value": f"R$ {meta_cpl:,.2f}".replace(",","."),
          "sub": "custo por lead",      "cor": ORANGE},
         {"label": "CPL VENCEDOR",      "value": f"R$ {meta_melhor:,.2f}".replace(",","."),
          "sub": "melhor criativo",     "cor": GREEN},
@@ -121,7 +121,7 @@ def gerar(dados: dict, output_path: str):
     story.append(Spacer(1, 5 * mm))
 
     # tabela funil
-    story.append(Paragraph("Distribuicao por etapa do funil",
+    story.append(Paragraph("Distribuição por etapa do funil",
                             S["body_bold"]))
     story.append(Spacer(1, 2 * mm))
 
@@ -171,14 +171,14 @@ def gerar(dados: dict, output_path: str):
     story.append(Spacer(1, 5 * mm))
 
     # seção 2 – criativos
-    story.append(SectionHeader(2, "ANALISE DE CRIATIVOS · FUNDO DE FUNIL"))
+    story.append(SectionHeader(2, "ANÁLISE DE CRIATIVOS · FUNDO DE FUNIL"))
     story.append(Spacer(1, 4 * mm))
 
     cri_rows = [[
         Paragraph("CRIATIVO", S["th"]), Paragraph("STATUS", S["th"]),
         Paragraph("GASTO", S["th"]),    Paragraph("LEADS", S["th"]),
         Paragraph("CPL", S["th"]),      Paragraph("HOOK RATE", S["th"]),
-        Paragraph("AVALIACAO", S["th"]),
+        Paragraph("AVALIAÇÃO", S["th"]),
     ]]
     for cri in d.get("criativos", []):
         ativo  = cri.get("status", "") == "Ativo"
@@ -221,7 +221,7 @@ def gerar(dados: dict, output_path: str):
         story.append(Spacer(1, 5 * mm))
 
     # seção 3 – conjuntos
-    story.append(SectionHeader(3, "CONJUNTOS DE ANUNCIOS · FUNDO"))
+    story.append(SectionHeader(3, "CONJUNTOS DE ANÚNCIOS · FUNDO"))
     story.append(Spacer(1, 4 * mm))
 
     conj_rows = [[
@@ -264,11 +264,11 @@ def gerar(dados: dict, output_path: str):
          "sub": "7 dias",          "cor": ORANGE},
         {"label": "CLIQUES",       "value": str(d.get("google_cliques", 0)),
          "sub": "brand search",    "cor": ORANGE},
-        {"label": "IMPRESSOES",    "value": str(d.get("google_impressoes", 0)),
+        {"label": "IMPRESSÕES",    "value": str(d.get("google_impressoes", 0)),
          "sub": "brand search",    "cor": ORANGE},
         {"label": "CTR",           "value": d.get("google_ctr", "0%"),
          "sub": "taxa de clique",  "cor": GREEN},
-        {"label": "CONVERSOES",    "value": str(d.get("google_conv", 0)),
+        {"label": "CONVERSÕES",    "value": str(d.get("google_conv", 0)),
          "sub": f"R$ {d.get('google_cpl',0):,.2f}/conv".replace(",","."), "cor": GREEN},
     ], n_cols=5))
     story.append(Spacer(1, 4 * mm))
@@ -277,22 +277,23 @@ def gerar(dados: dict, output_path: str):
     story.append(chart_donut(
         [("Meta Ads", meta_total, ORANGE), ("Google Ads", g_gasto, NAVY)],
         largura_mm=CW_MM, altura_mm=42,
-        titulo="Distribuicao do investimento total · semana",
+        titulo="Distribuição do investimento total · semana",
     ))
     story.append(Spacer(1, 4 * mm))
 
     if d.get("insights_google"):
-        story.append(InsightBox("GOOGLE · ANALISE", d["insights_google"],
+        story.append(InsightBox("GOOGLE · ANÁLISE", d["insights_google"],
                                 cor=NAVY))
         story.append(Spacer(1, 4 * mm))
 
-    # top palavras-chave
+    # ── TOP PALAVRAS-CHAVE (keywords configuradas) ────────────────────────
+    _sec_num = 5
     kw_top = d.get("google_kw_top", [])
     if kw_top:
-        story.append(SectionHeader(5, "GOOGLE · TOP PALAVRAS-CHAVE POR GASTO"))
+        story.append(SectionHeader(_sec_num, "GOOGLE · TOP PALAVRAS-CHAVE POR GASTO"))
         story.append(Spacer(1, 3 * mm))
         kw_rows = [[
-            Paragraph("PALAVRA-CHAVE / TERMO", S["th"]),
+            Paragraph("PALAVRA-CHAVE", S["th"]),
             Paragraph("CLIQUES", S["th"]),
             Paragraph("GASTO", S["th"]),
             Paragraph("CONV.", S["th"]),
@@ -309,14 +310,40 @@ def gerar(dados: dict, output_path: str):
         kw_t.setStyle(table_style_default())
         story.append(kw_t)
         story.append(Spacer(1, 4 * mm))
+        _sec_num += 1
 
-    # seção 5 – seguidores
+    # ── TOP TERMOS DE PESQUISA (o que o usuário digitou) ──────────────────
+    termos_top = d.get("google_termos_top", [])
+    if termos_top:
+        story.append(SectionHeader(_sec_num, "GOOGLE · TOP TERMOS DE PESQUISA POR GASTO"))
+        story.append(Spacer(1, 3 * mm))
+        tr_rows = [[
+            Paragraph("TERMO DE PESQUISA", S["th"]),
+            Paragraph("CLIQUES", S["th"]),
+            Paragraph("GASTO", S["th"]),
+            Paragraph("CONV.", S["th"]),
+        ]]
+        for t in termos_top:
+            tr_rows.append([
+                Paragraph(t.get("kw", ""), S["td"]),
+                Paragraph(str(t.get("cliques", 0)), S["td_r"]),
+                Paragraph(f"R$ {t.get('gasto', 0):.2f}", S["td_r"]),
+                Paragraph(str(t.get("conv", 0)), S["td_r"]),
+            ])
+        tr_t = Table(tr_rows, colWidths=[100*mm, 22*mm, 28*mm, 22*mm],
+                     repeatRows=1)
+        tr_t.setStyle(table_style_default())
+        story.append(tr_t)
+        story.append(Spacer(1, 4 * mm))
+        _sec_num += 1
+
+    # seção – seguidores
     if d.get("estrategia_seguidores"):
-        story.append(SectionHeader(5, "ESTRATEGIA · CRESCIMENTO DE SEGUIDORES"))
+        story.append(SectionHeader(_sec_num, "ESTRATÉGIA · CRESCIMENTO DE SEGUIDORES"))
         story.append(Spacer(1, 4 * mm))
         seg_rows = [[
             Paragraph("INICIATIVA", S["th"]),
-            Paragraph("ACAO", S["th"]),
+            Paragraph("AÇÃO", S["th"]),
             Paragraph("PRIORIDADE", S["th"]),
         ]]
         for item in d["estrategia_seguidores"]:
@@ -329,20 +356,22 @@ def gerar(dados: dict, output_path: str):
         seg_t.setStyle(table_style_default())
         story.append(seg_t)
         story.append(Spacer(1, 4 * mm))
+        _sec_num += 1
 
     if d.get("sugestoes_conteudo"):
         story.append(InsightBox(
-            "SUGESTOES DE CONTEUDO · TOPICOS QUE ESTAO FUNCIONANDO",
+            "SUGESTÕES DE CONTEÚDO · TÓPICOS QUE ESTÃO FUNCIONANDO",
             d["sugestoes_conteudo"],
         ))
         story.append(Spacer(1, 5 * mm))
+        _sec_num += 1
 
-    # seção 6 – próximos passos
-    story.append(SectionHeader(6, "PROXIMOS PASSOS · SEMANA SEGUINTE"))
+    # seção – próximos passos
+    story.append(SectionHeader(_sec_num, "PRÓXIMOS PASSOS · SEMANA SEGUINTE"))
     story.append(Spacer(1, 4 * mm))
 
     pp_rows = [[
-        Paragraph("ACAO", S["th"]),        Paragraph("RESPONSAVEL", S["th"]),
+        Paragraph("AÇÃO", S["th"]),        Paragraph("RESPONSÁVEL", S["th"]),
         Paragraph("PRAZO", S["th"]),       Paragraph("IMPACTO", S["th"]),
     ]]
     for pp in d.get("proximos_passos", []):
@@ -359,8 +388,8 @@ def gerar(dados: dict, output_path: str):
 
     # retorno
     ret_t = Table([[Paragraph(
-        "->  <b>RETORNO MARKSEG:</b>  Relatorio semanal · updates no WhatsApp"
-        " · acesso ao painel · reuniao mensal de calibracao.",
+        "->  <b>RETORNO MARKSEG:</b>  Relatório semanal · updates no WhatsApp"
+        " · acesso ao painel · reunião mensal de calibração.",
         S["insight"]
     )]], colWidths=[CW])
     ret_t.setStyle(TableStyle([
@@ -375,7 +404,7 @@ def gerar(dados: dict, output_path: str):
     def on_first(canvas, doc):
         draw_cover(
             canvas, doc,
-            titulo_doc    = "Relatorio de",
+            titulo_doc    = "Relatório de",
             subtitulo_doc = "Performance Semanal",
             cliente       = cliente,
             agencia       = agencia,

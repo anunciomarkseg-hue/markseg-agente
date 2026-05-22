@@ -505,17 +505,18 @@ def _analisar_performance(meta_camp, meta_conj, meta_anun,
     ins_google = []
     if g_cliq > 0:
         ins_google.append(
-            f"R$ {g_gasto:.2f} investidos · {g_cliq} cliques · {g_impr:,} impressões · CTR {g_ctr}"
+            f"R$ {g_gasto:.2f} investidos · {g_cliq} cliques · "
+            f"{g_impr:,} impressões · CTR {g_ctr}"
         )
     if g_conv > 0:
         ins_google.append(
-            f"{g_conv} conversão{'ões' if g_conv > 1 else ''} registrada{'s' if g_conv > 1 else ''} "
-            f"· CPL R$ {g_cpl:.2f}"
+            f"{g_conv} {'conversões' if g_conv > 1 else 'conversão'} "
+            f"registrada{'s' if g_conv > 1 else ''} · CPL R$ {g_cpl:.2f}"
         )
     elif g_cliq > 0:
         ins_google.append(
             "Fase de aprendizado do Google · sem conversões registradas ainda "
-            "(pode levar 7-14 dias para o algoritmo calibrar)"
+            "(pode levar 7–14 dias para o algoritmo calibrar)"
         )
 
     camps_g = [c for c in google.get("campanhas", []) if c["gasto"] > 0]
@@ -1037,11 +1038,12 @@ def montar_dados(tipo, cliente, periodo, responsavel,
     linhas_livres = extras.get("linhas_livres", [])
 
     # classifica e parseia cada DataFrame
-    meta_camp_raw  = []
-    meta_conj_raw  = []
-    meta_anun_raw  = []
-    google_raw     = {}
-    google_kw_top  = []
+    meta_camp_raw    = []
+    meta_conj_raw    = []
+    meta_anun_raw    = []
+    google_raw       = {}
+    google_kw_top    = []   # palavras-chave configuradas (bid keywords)
+    google_termos_top = []  # termos reais digitados pelos usuários
 
     for nome_arq, df in dfs.items():
         tipo_csv = detectar_tipo_csv(df)
@@ -1056,9 +1058,11 @@ def montar_dados(tipo, cliente, periodo, responsavel,
             # usa o arquivo com mais gasto (evita double-count acumulando)
             if novo.get("gasto", 0) >= google_raw.get("gasto", 0):
                 google_raw = novo
-            # top keywords de qualquer arquivo com coluna de palavra-chave/termo
-            if tipo_csv in ("google_keywords", "google_termos") and not google_kw_top:
+            # separa palavras-chave (configuradas) de termos de pesquisa (digitados)
+            if tipo_csv == "google_keywords" and not google_kw_top:
                 google_kw_top = parse_google_keywords_top(df, top_n=5)
+            elif tipo_csv == "google_termos" and not google_termos_top:
+                google_termos_top = parse_google_keywords_top(df, top_n=5)
 
     # ── Relatório de Performance ──────────────────────────────────────────
     if tipo == "relatorio_performance":
@@ -1131,7 +1135,8 @@ def montar_dados(tipo, cliente, periodo, responsavel,
             "google_ctr":        g.get("ctr", "0%"),
             "google_conv":       g.get("conv", 0),
             "google_cpl":        g.get("cpl", 0),
-            "google_kw_top":     google_kw_top,
+            "google_kw_top":      google_kw_top,
+            "google_termos_top":  google_termos_top,
             "insights_criativos": insights_meta[:5],
             "insights_google":    insights_google,
             "sugestoes_conteudo": [],
@@ -1209,7 +1214,7 @@ def montar_dados(tipo, cliente, periodo, responsavel,
             "aprendizados": linhas_livres,
             "plano_proximo_mes": [],
             "frase_resumo":   f"R$ {total_inv:.2f} investidos · {total_leads} leads gerados.",
-            "frase_destaque": f"CPL médio R$ {cpl_geral:.2f} · resultado do mes.",
+            "frase_destaque": f"CPL médio R$ {cpl_geral:.2f} · resultado do mês.",
             "conteudo_livre": [],
         })
         if texto_livre:
