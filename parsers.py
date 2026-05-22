@@ -1075,6 +1075,9 @@ def montar_dados(tipo, cliente, periodo, responsavel,
         }
         campanhas_template = []
         for c in meta_camp_raw:
+            # pula campanhas sem nenhuma atividade no período
+            if c.get("gasto", 0) == 0 and c.get("impressoes", 0) == 0:
+                continue
             etapa = "FUNDO"
             for k, v in ETAPA_MAP.items():
                 if k in c["nome"].lower():

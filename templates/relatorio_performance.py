@@ -83,7 +83,11 @@ def gerar(dados: dict, output_path: str):
     periodo     = d.get("periodo", "")
     agencia     = d.get("agencia", "MarkSeg Trafego")
     responsavel = d.get("responsavel", "Rafael")
-    total_pags  = 3
+
+    # total de páginas dinâmico: capa + Meta + Google/extras
+    kw_top     = d.get("google_kw_top", [])
+    termos_top = d.get("google_termos_top", [])
+    total_pags = 3 + (1 if (kw_top or termos_top) else 0)
 
     doc = SimpleDocTemplate(
         output_path,
@@ -94,8 +98,9 @@ def gerar(dados: dict, output_path: str):
 
     story = [PageBreak()]   # página 1 = capa, story começa na pág. 2
 
+    # largura útil: CW = W - 2*MARGIN = 170 mm  ← todas as tabelas respeitam isso
     # ── PÁG 2 · META ADS ──────────────────────────────────────────────────
-    story.append(PageHeader(cliente, f"Semana · {periodo}", "02 / 03"))
+    story.append(PageHeader(cliente, f"Semana · {periodo}", ""))
     story.append(Spacer(1, 4 * mm))
 
     # seção 1 – visão geral meta
@@ -105,33 +110,39 @@ def gerar(dados: dict, output_path: str):
     meta_total  = d.get("meta_total", 0)
     meta_leads  = d.get("meta_leads", 0)
     meta_cpl    = d.get("meta_cpl", 0)
-    meta_melhor = min((c["cpl"] for c in d.get("criativos", [])
-                       if c.get("leads", 0) >= 5), default=meta_cpl)
+    # CPL vencedor: melhor CPL entre criativos com pelo menos 1 lead
+    meta_melhor = min(
+        (c["cpl"] for c in d.get("criativos", []) if c.get("leads", 0) >= 1),
+        default=meta_cpl
+    )
 
     story.append(make_cards_row([
         {"label": "INVESTIMENTO META", "value": f"R$ {meta_total:,.2f}".replace(",","."),
          "sub": "total 7 dias",        "cor": ORANGE},
         {"label": "LEADS GERADOS",     "value": str(meta_leads),
          "sub": "campanha fundo",      "cor": ORANGE},
-        {"label": "CPL MÉDIO FUNDO",   "value": f"R$ {meta_cpl:,.2f}".replace(",","."),
+        {"label": "CPL MÉDIO",         "value": f"R$ {meta_cpl:,.2f}".replace(",","."),
          "sub": "custo por lead",      "cor": ORANGE},
         {"label": "CPL VENCEDOR",      "value": f"R$ {meta_melhor:,.2f}".replace(",","."),
          "sub": "melhor criativo",     "cor": GREEN},
     ]))
     story.append(Spacer(1, 5 * mm))
 
-    # tabela funil
-    story.append(Paragraph("Distribuição por etapa do funil",
-                            S["body_bold"]))
+    # tabela funil — apenas campanhas com atividade no período
+    story.append(Paragraph("Distribuição por etapa do funil", S["body_bold"]))
     story.append(Spacer(1, 2 * mm))
 
     etapa_cores = {"TOPO": NAVY, "MEIO": BLUE, "FUNDO": ORANGE}
+    campanhas_ativas = [
+        c for c in d.get("meta_campanhas", [])
+        if c.get("verba", 0) > 0 or c.get("impressoes", 0) > 0
+    ]
     funil_rows = [[
-        Paragraph("ETAPA", S["th"]), Paragraph("CAMPANHA", S["th"]),
-        Paragraph("VERBA", S["th"]), Paragraph("RESULTADO", S["th"]),
-        Paragraph("CPR", S["th"]),   Paragraph("IMP.", S["th"]),
+        Paragraph("ETAPA",     S["th"]), Paragraph("CAMPANHA",   S["th"]),
+        Paragraph("VERBA",     S["th"]), Paragraph("RESULTADO",  S["th"]),
+        Paragraph("CPR",       S["th"]), Paragraph("IMP.",       S["th"]),
     ]]
-    for camp in d.get("meta_campanhas", []):
+    for camp in campanhas_ativas:
         etapa_cor = etapa_cores.get(camp.get("etapa", "FUNDO").upper(), NAVY)
         funil_rows.append([
             TagBadge(camp.get("etapa", ""), etapa_cor),
@@ -142,7 +153,7 @@ def gerar(dados: dict, output_path: str):
             Paragraph(f"{camp.get('impressoes', 0):,}".replace(",","."), S["td_r"]),
         ])
 
-    total_imp = sum(c.get("impressoes", 0) for c in d.get("meta_campanhas", []))
+    total_imp = sum(c.get("impressoes", 0) for c in campanhas_ativas)
     funil_rows.append([
         Paragraph("TOTAL", S["th"]), Paragraph("", S["th"]),
         Paragraph(f"R$ {meta_total:,.2f}".replace(",","."), S["th"]),
@@ -151,60 +162,67 @@ def gerar(dados: dict, output_path: str):
         Paragraph(f"{total_imp:,}".replace(",","."), S["th"]),
     ])
 
-    funil_cols = [18*mm, 65*mm, 22*mm, 38*mm, 18*mm, 17*mm]
+    # ETAPA(16) + CAMPANHA(64) + VERBA(22) + RESULTADO(30) + CPR(22) + IMP.(16) = 170
+    funil_cols = [16*mm, 64*mm, 22*mm, 30*mm, 22*mm, 16*mm]
     ft = Table(funil_rows, colWidths=funil_cols, repeatRows=1)
     ft.setStyle(table_style_default())
     ft.setStyle(table_total_row(len(funil_rows) - 1))
     story.append(ft)
     story.append(Spacer(1, 4 * mm))
 
-    # gráfico funil
-    graf_funil = chart_barras_horizontais(
-        [(c.get("etapa","") + " · " + c.get("nome","")[:25],
-          c.get("verba", 0),
-          etapa_cores.get(c.get("etapa","FUNDO").upper(), NAVY))
-         for c in d.get("meta_campanhas", [])],
-        largura_mm=CW_MM, altura_mm=45,
-        titulo="Investimento por etapa do funil",
-    )
-    story.append(graf_funil)
-    story.append(Spacer(1, 5 * mm))
+    # gráfico funil — apenas campanhas com verba
+    graf_funil_dados = [
+        (c.get("etapa","") + " · " + c.get("nome","")[:22],
+         c.get("verba", 0),
+         etapa_cores.get(c.get("etapa","FUNDO").upper(), NAVY))
+        for c in campanhas_ativas if c.get("verba", 0) > 0
+    ]
+    if graf_funil_dados:
+        story.append(chart_barras_horizontais(
+            graf_funil_dados,
+            largura_mm=CW_MM, altura_mm=max(30, len(graf_funil_dados) * 10),
+            titulo="Investimento por etapa do funil",
+        ))
+        story.append(Spacer(1, 5 * mm))
 
-    # seção 2 – criativos
-    story.append(SectionHeader(2, "ANÁLISE DE CRIATIVOS · FUNDO DE FUNIL"))
+    # seção 2 – criativos (top 5, já filtrados com gasto > 0)
+    story.append(SectionHeader(2, "ANÁLISE DE CRIATIVOS · TOP 5"))
     story.append(Spacer(1, 4 * mm))
 
+    # CRIATIVO(52) + STATUS(18) + GASTO(20) + LEADS(15) + CPL(20) + HOOK(18) + AVAL(27) = 170
     cri_rows = [[
-        Paragraph("CRIATIVO", S["th"]), Paragraph("STATUS", S["th"]),
-        Paragraph("GASTO", S["th"]),    Paragraph("LEADS", S["th"]),
-        Paragraph("CPL", S["th"]),      Paragraph("HOOK RATE", S["th"]),
+        Paragraph("CRIATIVO",  S["th"]), Paragraph("STATUS",    S["th"]),
+        Paragraph("GASTO",     S["th"]), Paragraph("LEADS",     S["th"]),
+        Paragraph("CPL",       S["th"]), Paragraph("HOOK RATE", S["th"]),
         Paragraph("AVALIAÇÃO", S["th"]),
     ]]
     for cri in d.get("criativos", []):
-        ativo  = cri.get("status", "") == "Ativo"
-        dest   = cri.get("destaque", False)
+        ativo = cri.get("status", "") == "Ativo"
+        dest  = cri.get("destaque", False)
+        tem_lead = cri.get("leads", 0) >= 1
         cri_rows.append([
             Paragraph(cri.get("nome", ""), S["td_bold"] if dest else S["td"]),
-            Paragraph(cri.get("status", ""), S["td_green"] if ativo else S["td_red"]),
+            Paragraph(cri.get("status", ""),
+                      S["td_green"] if ativo else S["td_red"]),
             Paragraph(f"R$ {cri.get('gasto', 0):,.2f}".replace(",","."), S["td_r"]),
             Paragraph(str(cri.get("leads", 0)),
-                      S["td_green"] if dest else S["td"]),
+                      S["td_green"] if tem_lead else S["td"]),
             Paragraph(f"R$ {cri.get('cpl', 0):,.2f}".replace(",","."),
-                      S["td_green"] if cri.get("leads", 0) >= 5 else S["td"]),
+                      S["td_green"] if tem_lead else S["td"]),
             Paragraph(cri.get("hook", "—"), S["td_r"]),
-            Paragraph(cri.get("avaliacao", ""), S["td_orange"] if dest else S["td"]),
+            Paragraph(cri.get("avaliacao", ""),
+                      S["td_orange"] if dest else S["td"]),
         ])
 
-    cri_cols = [42*mm, 14*mm, 18*mm, 12*mm, 18*mm, 18*mm, 26*mm]
+    cri_cols = [52*mm, 18*mm, 20*mm, 15*mm, 20*mm, 18*mm, 27*mm]
     ct = Table(cri_rows, colWidths=cri_cols, repeatRows=1)
     ct.setStyle(table_style_default())
     story.append(ct)
     story.append(Spacer(1, 4 * mm))
 
-    # gráfico criativos
+    # gráfico criativos com lead
     cri_graf_dados = [
-        (c.get("nome", "")[:15], c.get("leads", 0),
-         f"R${c.get('cpl',0):.2f}")
+        (c.get("nome", "")[:18], c.get("leads", 0), f"R${c.get('cpl',0):.2f}")
         for c in d.get("criativos", []) if c.get("leads", 0) > 0
     ]
     if cri_graf_dados:
@@ -216,46 +234,53 @@ def gerar(dados: dict, output_path: str):
         story.append(Spacer(1, 4 * mm))
 
     if d.get("insights_criativos"):
-        story.append(InsightBox("INSIGHT · CRIATIVO VENCEDOR",
-                                d["insights_criativos"]))
+        story.append(InsightBox("INSIGHT · CRIATIVO VENCEDOR", d["insights_criativos"]))
         story.append(Spacer(1, 5 * mm))
 
-    # seção 3 – conjuntos
-    story.append(SectionHeader(3, "CONJUNTOS DE ANÚNCIOS · FUNDO"))
-    story.append(Spacer(1, 4 * mm))
+    # seção 3 – conjuntos (apenas com atividade)
+    conjuntos_ativos = [
+        c for c in d.get("conjuntos", [])
+        if c.get("gasto", 0) > 0 or c.get("leads", 0) > 0
+    ]
+    if conjuntos_ativos:
+        story.append(SectionHeader(3, "CONJUNTOS DE ANÚNCIOS · FUNDO"))
+        story.append(Spacer(1, 4 * mm))
 
-    conj_rows = [[
-        Paragraph("CONJUNTO", S["th"]),   Paragraph("STATUS", S["th"]),
-        Paragraph("ORC./DIA", S["th"]),   Paragraph("GASTO", S["th"]),
-        Paragraph("LEADS", S["th"]),      Paragraph("CPL", S["th"]),
-        Paragraph("ALCANCE", S["th"]),
-    ]]
-    for conj in d.get("conjuntos", []):
-        ativo = conj.get("status", "") == "Ativo"
-        cpl   = conj.get("cpl", 0)
-        conj_rows.append([
-            Paragraph(conj.get("nome", ""), S["td_bold"]),
-            Paragraph(conj.get("status", ""), S["td_green"] if ativo else S["td_red"]),
-            Paragraph(f"R$ {conj.get('orcamento',0):,.2f}".replace(",","."), S["td_r"]),
-            Paragraph(f"R$ {conj.get('gasto',0):,.2f}".replace(",","."), S["td_r"]),
-            Paragraph(str(conj.get("leads", 0)), S["td"]),
-            Paragraph(f"R$ {cpl:,.2f}".replace(",","."),
-                      S["td_green"] if cpl < 10 else S["td_red"]),
-            Paragraph(f"{conj.get('alcance',0):,}".replace(",","."), S["td_r"]),
-        ])
+        # CONJUNTO(62) + STATUS(18) + ORC/DIA(20) + GASTO(20) + LEADS(14) + CPL(20) + ALCANCE(16) = 170
+        conj_rows = [[
+            Paragraph("CONJUNTO",  S["th"]), Paragraph("STATUS",  S["th"]),
+            Paragraph("ORC./DIA",  S["th"]), Paragraph("GASTO",   S["th"]),
+            Paragraph("LEADS",     S["th"]), Paragraph("CPL",     S["th"]),
+            Paragraph("ALCANCE",   S["th"]),
+        ]]
+        for conj in conjuntos_ativos:
+            ativo = conj.get("status", "") == "Ativo"
+            cpl   = conj.get("cpl", 0)
+            conj_rows.append([
+                Paragraph(conj.get("nome", ""), S["td_bold"]),
+                Paragraph(conj.get("status", ""),
+                          S["td_green"] if ativo else S["td_red"]),
+                Paragraph(f"R$ {conj.get('orcamento',0):,.2f}".replace(",","."), S["td_r"]),
+                Paragraph(f"R$ {conj.get('gasto',0):,.2f}".replace(",","."), S["td_r"]),
+                Paragraph(str(conj.get("leads", 0)), S["td"]),
+                Paragraph(f"R$ {cpl:,.2f}".replace(",","."),
+                          S["td_green"] if (cpl > 0 and cpl < 80) else
+                          (S["td_red"] if cpl >= 80 else S["td"])),
+                Paragraph(f"{conj.get('alcance',0):,}".replace(",","."), S["td_r"]),
+            ])
 
-    conj_cols = [60*mm, 14*mm, 18*mm, 18*mm, 12*mm, 18*mm, 18*mm]
-    conj_t = Table(conj_rows, colWidths=conj_cols, repeatRows=1)
-    conj_t.setStyle(table_style_default())
-    story.append(conj_t)
+        conj_cols = [62*mm, 18*mm, 20*mm, 20*mm, 14*mm, 20*mm, 16*mm]
+        conj_t = Table(conj_rows, colWidths=conj_cols, repeatRows=1)
+        conj_t.setStyle(table_style_default())
+        story.append(conj_t)
 
-    # ── PÁG 3 · GOOGLE + SEGUIDORES + PRÓXIMOS PASSOS ────────────────────
+    # ── PÁG 3 · GOOGLE ───────────────────────────────────────────────────
     story.append(Spacer(1, 6 * mm))
-    story.append(PageHeader(cliente, f"Semana · {periodo}", "03 / 03"))
+    story.append(PageHeader(cliente, f"Semana · {periodo}", ""))
     story.append(Spacer(1, 4 * mm))
 
     # seção 4 – google
-    story.append(SectionHeader(4, "GOOGLE ADS · BRAND SEARCH"))
+    story.append(SectionHeader(4, "GOOGLE ADS · SEARCH"))
     story.append(Spacer(1, 4 * mm))
 
     g_gasto = d.get("google_gasto", 0)
@@ -263,9 +288,9 @@ def gerar(dados: dict, output_path: str):
         {"label": "INVESTIMENTO",  "value": f"R$ {g_gasto:,.2f}".replace(",","."),
          "sub": "7 dias",          "cor": ORANGE},
         {"label": "CLIQUES",       "value": str(d.get("google_cliques", 0)),
-         "sub": "brand search",    "cor": ORANGE},
-        {"label": "IMPRESSÕES",    "value": str(d.get("google_impressoes", 0)),
-         "sub": "brand search",    "cor": ORANGE},
+         "sub": "total search",    "cor": ORANGE},
+        {"label": "IMPRESSÕES",    "value": f"{d.get('google_impressoes', 0):,}".replace(",","."),
+         "sub": "total search",    "cor": ORANGE},
         {"label": "CTR",           "value": d.get("google_ctr", "0%"),
          "sub": "taxa de clique",  "cor": GREEN},
         {"label": "CONVERSÕES",    "value": str(d.get("google_conv", 0)),
@@ -273,7 +298,7 @@ def gerar(dados: dict, output_path: str):
     ], n_cols=5))
     story.append(Spacer(1, 4 * mm))
 
-    # donut split
+    # donut
     story.append(chart_donut(
         [("Meta Ads", meta_total, ORANGE), ("Google Ads", g_gasto, NAVY)],
         largura_mm=CW_MM, altura_mm=42,
@@ -282,21 +307,21 @@ def gerar(dados: dict, output_path: str):
     story.append(Spacer(1, 4 * mm))
 
     if d.get("insights_google"):
-        story.append(InsightBox("GOOGLE · ANÁLISE", d["insights_google"],
-                                cor=NAVY))
+        story.append(InsightBox("GOOGLE · ANÁLISE", d["insights_google"], cor=NAVY))
         story.append(Spacer(1, 4 * mm))
 
-    # ── TOP PALAVRAS-CHAVE (keywords configuradas) ────────────────────────
+    # PALAVRA/TERMO(110) + CLIQUES(20) + GASTO(26) + CONV.(14) = 170
+    _kw_cols = [110*mm, 20*mm, 26*mm, 14*mm]
     _sec_num = 5
-    kw_top = d.get("google_kw_top", [])
+
     if kw_top:
         story.append(SectionHeader(_sec_num, "GOOGLE · TOP PALAVRAS-CHAVE POR GASTO"))
         story.append(Spacer(1, 3 * mm))
         kw_rows = [[
             Paragraph("PALAVRA-CHAVE", S["th"]),
-            Paragraph("CLIQUES", S["th"]),
-            Paragraph("GASTO", S["th"]),
-            Paragraph("CONV.", S["th"]),
+            Paragraph("CLIQUES",       S["th"]),
+            Paragraph("GASTO",         S["th"]),
+            Paragraph("CONV.",         S["th"]),
         ]]
         for kw in kw_top:
             kw_rows.append([
@@ -305,23 +330,20 @@ def gerar(dados: dict, output_path: str):
                 Paragraph(f"R$ {kw.get('gasto', 0):.2f}", S["td_r"]),
                 Paragraph(str(kw.get("conv", 0)), S["td_r"]),
             ])
-        kw_t = Table(kw_rows, colWidths=[100*mm, 22*mm, 28*mm, 22*mm],
-                     repeatRows=1)
+        kw_t = Table(kw_rows, colWidths=_kw_cols, repeatRows=1)
         kw_t.setStyle(table_style_default())
         story.append(kw_t)
         story.append(Spacer(1, 4 * mm))
         _sec_num += 1
 
-    # ── TOP TERMOS DE PESQUISA (o que o usuário digitou) ──────────────────
-    termos_top = d.get("google_termos_top", [])
     if termos_top:
         story.append(SectionHeader(_sec_num, "GOOGLE · TOP TERMOS DE PESQUISA POR GASTO"))
         story.append(Spacer(1, 3 * mm))
         tr_rows = [[
             Paragraph("TERMO DE PESQUISA", S["th"]),
-            Paragraph("CLIQUES", S["th"]),
-            Paragraph("GASTO", S["th"]),
-            Paragraph("CONV.", S["th"]),
+            Paragraph("CLIQUES",           S["th"]),
+            Paragraph("GASTO",             S["th"]),
+            Paragraph("CONV.",             S["th"]),
         ]]
         for t in termos_top:
             tr_rows.append([
@@ -330,21 +352,19 @@ def gerar(dados: dict, output_path: str):
                 Paragraph(f"R$ {t.get('gasto', 0):.2f}", S["td_r"]),
                 Paragraph(str(t.get("conv", 0)), S["td_r"]),
             ])
-        tr_t = Table(tr_rows, colWidths=[100*mm, 22*mm, 28*mm, 22*mm],
-                     repeatRows=1)
+        tr_t = Table(tr_rows, colWidths=_kw_cols, repeatRows=1)
         tr_t.setStyle(table_style_default())
         story.append(tr_t)
         story.append(Spacer(1, 4 * mm))
         _sec_num += 1
 
-    # seção – seguidores
     if d.get("estrategia_seguidores"):
         story.append(SectionHeader(_sec_num, "ESTRATÉGIA · CRESCIMENTO DE SEGUIDORES"))
         story.append(Spacer(1, 4 * mm))
         seg_rows = [[
-            Paragraph("INICIATIVA", S["th"]),
-            Paragraph("AÇÃO", S["th"]),
-            Paragraph("PRIORIDADE", S["th"]),
+            Paragraph("INICIATIVA",  S["th"]),
+            Paragraph("AÇÃO",        S["th"]),
+            Paragraph("PRIORIDADE",  S["th"]),
         ]]
         for item in d["estrategia_seguidores"]:
             seg_rows.append([
@@ -352,7 +372,8 @@ def gerar(dados: dict, output_path: str):
                 Paragraph(item.get("acao", ""), S["td"]),
                 Paragraph(item.get("prioridade", ""), S["td_orange"]),
             ])
-        seg_t = Table(seg_rows, colWidths=[45*mm, 100*mm, 28*mm], repeatRows=1)
+        # INICIATIVA(45) + ACAO(97) + PRIORIDADE(28) = 170
+        seg_t = Table(seg_rows, colWidths=[45*mm, 97*mm, 28*mm], repeatRows=1)
         seg_t.setStyle(table_style_default())
         story.append(seg_t)
         story.append(Spacer(1, 4 * mm))
@@ -364,15 +385,17 @@ def gerar(dados: dict, output_path: str):
             d["sugestoes_conteudo"],
         ))
         story.append(Spacer(1, 5 * mm))
-        _sec_num += 1
 
     # seção – próximos passos
     story.append(SectionHeader(_sec_num, "PRÓXIMOS PASSOS · SEMANA SEGUINTE"))
     story.append(Spacer(1, 4 * mm))
 
+    # ACAO(75) + RESPONSAVEL(32) + PRAZO(22) + IMPACTO(41) = 170
     pp_rows = [[
-        Paragraph("AÇÃO", S["th"]),        Paragraph("RESPONSÁVEL", S["th"]),
-        Paragraph("PRAZO", S["th"]),       Paragraph("IMPACTO", S["th"]),
+        Paragraph("AÇÃO",        S["th"]),
+        Paragraph("RESPONSÁVEL", S["th"]),
+        Paragraph("PRAZO",       S["th"]),
+        Paragraph("IMPACTO",     S["th"]),
     ]]
     for pp in d.get("proximos_passos", []):
         pp_rows.append([
@@ -381,14 +404,14 @@ def gerar(dados: dict, output_path: str):
             Paragraph(pp.get("prazo", ""), S["td_orange"]),
             Paragraph(pp.get("impacto", ""), S["td"]),
         ])
-    pp_t = Table(pp_rows, colWidths=[80*mm, 35*mm, 25*mm, 38*mm], repeatRows=1)
+    pp_t = Table(pp_rows, colWidths=[75*mm, 32*mm, 22*mm, 41*mm], repeatRows=1)
     pp_t.setStyle(table_style_default())
     story.append(pp_t)
     story.append(Spacer(1, 3 * mm))
 
-    # retorno
+    # faixa de retorno
     ret_t = Table([[Paragraph(
-        "->  <b>RETORNO MARKSEG:</b>  Relatório semanal · updates no WhatsApp"
+        "<b>RETORNO MARKSEG:</b>  Relatório semanal · updates no WhatsApp"
         " · acesso ao painel · reunião mensal de calibração.",
         S["insight"]
     )]], colWidths=[CW])
