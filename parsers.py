@@ -760,6 +760,245 @@ def parse_texto_completo(texto: str) -> list:
     return blocos
 
 
+# ── Extrator universal por tipo de documento ──────────────────────────────
+
+def _extrair_por_tipo(texto: str, tipo: str, linhas: list) -> dict:
+    """
+    Lê o texto colado e extrai campos específicos para cada tipo de documento.
+    Funciona para TODOS os 7 tipos — sem API, só regras.
+    Retorna um dict que sobrescreve os valores padrão do template.
+    """
+    blocos = parse_texto_completo(texto) if texto else []
+
+    # ── Índice de KV pairs e bullets de todo o texto ──────────────────────
+    kv: dict     = {}   # "chave lower" → "valor"
+    bullets: list = []  # todos os bullets do texto
+    paragrafos: list = []  # parágrafos de texto
+
+    for b in blocos:
+        if b["tipo"] == "keyvalues":
+            for item in b["itens"]:
+                kv[item["chave"].lower().strip()] = item["valor"].strip()
+        elif b["tipo"] == "bullets":
+            bullets.extend(b["itens"])
+        elif b["tipo"] == "texto":
+            paragrafos.extend(b["linhas"])
+
+    def _v(keys: list, fallback="") -> str:
+        """Busca valor string por palavras-chave nas chaves KV."""
+        for k in keys:
+            for kk, vv in kv.items():
+                if k.lower() in kk:
+                    return vv
+        return fallback
+
+    def _n(keys: list) -> float:
+        """Busca valor numérico por palavras-chave nas chaves KV."""
+        v = _v(keys)
+        return num(v) if v else 0.0
+
+    campos: dict = {"conteudo_livre": blocos}
+
+    # ══════════════════════════════════════════════════════════════════════
+    if tipo == "proposta_comercial":
+        vm  = _n(["verba", "mídia", "media", "google ads", "meta ads",
+                   "investimento em mídia"])
+        hon = _n(["honorário", "honorario", "gestão", "fee", "management",
+                  "agência", "serviço de gestão"])
+        tot = vm + hon if (vm or hon) else 0.0
+
+        servicos_raw = [v for k, v in kv.items()
+                        if any(x in k for x in
+                               ["serviço", "servico", "inclui", "entregável",
+                                "produto", "pacote", "atividade"])]
+        if not servicos_raw:
+            servicos_raw = bullets[:10]
+
+        resultados_raw = [v for k, v in kv.items()
+                          if any(x in k for x in
+                                 ["resultado", "meta", "lead", "roas",
+                                  "cpl", "retorno", "projeção"])]
+        if not resultados_raw:
+            resultados_raw = [l for l in linhas
+                              if any(x in l.lower()
+                                     for x in ["lead", "cpl", "r$", "roas", "meta"])][:5]
+
+        diag = paragrafos[:3] or linhas[:3]
+
+        campos.update({
+            "verba_midia":          vm,
+            "honorarios":           hon,
+            "total_mensal":         tot or _n(["total", "valor total", "investimento total"]),
+            "diagnostico":          diag,
+            "servicos":             [{"servico": s, "descricao": ""} for s in servicos_raw[:8]],
+            "resultados_esperados": resultados_raw[:6],
+        })
+
+    # ══════════════════════════════════════════════════════════════════════
+    elif tipo == "ficha_implantacao":
+        # responsáveis: pares "Cargo: Nome" de qualquer KV
+        resp_kvs = [(k, v) for k, v in kv.items()
+                    if any(x in k for x in
+                           ["diretor", "gerente", "marketing", "comercial",
+                            "responsável", "responsavel", "contato", "analista",
+                            "gestor", "coordenador", "fundador"])]
+        responsaveis = [{"cargo": k.title(), "nome": v} for k, v in resp_kvs[:6]]
+
+        # processos: comunicação e fluxos
+        proc = [f"{k.title()}: {v}" for k, v in kv.items()
+                if any(x in k for x in
+                       ["aprovação", "aprovacao", "processo", "frequência",
+                        "reunião", "reuniao", "prazo", "entrega", "whatsapp",
+                        "grupo", "comunicação"])]
+
+        # comunicação: canais de contato
+        com = [f"{k.title()}: {v}" for k, v in kv.items()
+               if any(x in k for x in
+                      ["canal", "whatsapp", "email", "slack", "drive", "grupo"])]
+
+        campos.update({
+            "responsaveis":        responsaveis,
+            "postagens_mensais":   _v(["postagens", "posts por", "publicações"]),
+            "formato_prioritario": _v(["formato", "prioridade de formato", "tipo de conteúdo"]),
+            "linguagem":           _v(["linguagem", "tom de voz", "voz", "comunicação"]),
+            "layout_cores":        _v(["layout", "cores", "visual", "identidade visual"]),
+            "descricao_empresa":   _v(["descrição", "sobre a empresa", "empresa",
+                                        "histórico", "história"]) or "\n".join(paragrafos[:2]),
+            "posicionamento":      _v(["posicionamento", "proposta de valor", "diferencial"]),
+            "diferenciais":        [v for k, v in kv.items()
+                                    if any(x in k for x in
+                                           ["diferencial", "vantagem", "ponto forte"])] or bullets[:5],
+            "publico_perfis":      _v(["perfil de público", "perfis", "público-alvo",
+                                        "segmento", "persona"]),
+            "publico_meta":        _v(["público meta", "público prioritário", "target"]),
+            "publico_estrategia":  _v(["estratégia de público", "segmentação",
+                                        "como atingir"]),
+            "leads_canais":        _v(["canais de captação", "canais de lead",
+                                        "fontes de lead", "canal de geração"]),
+            "leads_estrategia":    _v(["estratégia de leads", "captação",
+                                        "geração de leads"]),
+            "comunicacao":         com or linhas[:4],
+            "processos":           proc or linhas[4:8],
+            "obj_curto_prazo":     _v(["curto prazo", "30 dias", "objetivos imediatos",
+                                        "mês 1"]),
+            "obj_medio_prazo":     _v(["médio prazo", "3 meses", "6 meses",
+                                        "objetivos de médio"]),
+            "obj_trafego":         _v(["objetivo de tráfego", "meta de leads",
+                                        "leads por mês", "cpl meta"]),
+        })
+
+    # ══════════════════════════════════════════════════════════════════════
+    elif tipo == "relatorio_social":
+        seg_atual = int(_n(["seguidores atual", "seguidores hoje", "total de seguidores",
+                             "seguidores"]))
+        seg_novos = int(_n(["novos seguidores", "crescimento", "seguidores novos",
+                             "ganho de seguidores"]))
+        alcance   = int(_n(["alcance", "reach"]))
+        impr      = int(_n(["impressões", "impressions"]))
+        saves     = int(_n(["salvamentos", "saves"]))
+        eng       = _v(["engajamento", "taxa de engajamento", "engagement"])
+
+        # posts: procura padrão "Post X: descrição" nos KV
+        posts_raw = [{"nome": k.title(), "alcance": 0, "likes": 0,
+                      "comments": 0, "saves": 0, "tipo": "Post"}
+                     for k, v in kv.items()
+                     if any(x in k for x in ["post", "reel", "story", "carrossel"])][:8]
+
+        recomendacoes = [v for k, v in kv.items()
+                         if any(x in k for x in ["recomendação", "sugestão", "ação",
+                                                   "próximo passo", "melhoria"])]
+        if not recomendacoes:
+            recomendacoes = bullets[:5]
+
+        pauta = [v for k, v in kv.items()
+                 if any(x in k for x in ["pauta", "próxima semana", "conteúdo",
+                                          "programar", "agendar"])]
+        if not pauta:
+            pauta = bullets[5:10]
+
+        campos.update({
+            "seguidores_atual":  seg_atual,
+            "seguidores_novos":  seg_novos,
+            "alcance_total":     alcance,
+            "impressoes_total":  impr,
+            "engajamento_medio": eng or "—",
+            "saves_total":       saves,
+            "posts":             posts_raw[:5],
+            "reels":             [],
+            "insights_semana":   paragrafos or linhas[:6],
+            "recomendacoes":     recomendacoes[:6],
+            "pauta_proxima":     pauta[:6],
+        })
+
+    # ══════════════════════════════════════════════════════════════════════
+    elif tipo == "plano_de_midia":
+        investimento = _n(["verba total", "investimento total", "budget total",
+                            "investimento mensal"])
+        leads_est    = _v(["leads estimados", "projeção de leads", "meta de leads"])
+        cpl_min      = _n(["cpl mínimo", "cpl min", "cpl de "])
+        cpl_max      = _n(["cpl máximo", "cpl max"])
+
+        # canais: KV com valores monetários para canais conhecidos
+        canais = []
+        for k, v in kv.items():
+            vn = num(v)
+            for canal in ["google", "meta", "instagram", "facebook",
+                          "youtube", "pmax", "search", "remarketing"]:
+                if canal in k and vn > 0:
+                    canais.append({
+                        "canal":       k.title(),
+                        "funcao":      _v([k]),
+                        "verba":       vn,
+                        "percentual":  f"{round(vn/investimento*100)}%" if investimento else "—",
+                        "formato":     "",
+                    })
+                    break
+
+        infra = [f"{k.title()}: {v}" for k, v in kv.items()
+                 if any(x in k for x in ["pixel", "ga4", "gtm", "capi",
+                                          "tracking", "rd station", "crm"])]
+        precisa = [f"{k.title()}: {v}" for k, v in kv.items()
+                   if any(x in k for x in ["acesso", "cliente fornece",
+                                             "necessário", "precisa"])]
+        palavras = [v for k, v in kv.items()
+                    if any(x in k for x in ["palavra", "keyword", "termo",
+                                             "busca"])]
+
+        # cronograma: blocos com datas ou semanas
+        crono = [{"semana": b["texto"] if b["tipo"] in ("secao","subsecao") else "",
+                   "acoes": b.get("itens", b.get("linhas", []))}
+                 for b in blocos
+                 if b["tipo"] in ("secao","subsecao","bullets")
+                 and any(x in b.get("texto","").lower()
+                         for x in ["semana", "mês", "mes", "fase", "etapa"])]
+
+        campos.update({
+            "investimento":       investimento,
+            "leads_estimados":    leads_est or "—",
+            "cpl_estimado_min":   cpl_min,
+            "cpl_estimado_max":   cpl_max,
+            "canais":             canais or [],
+            "produtos":           bullets[:5],
+            "cronograma":         crono[:6],
+            "infraestrutura":     infra or linhas[:6],
+            "precisa_cliente":    precisa or [],
+            "palavras_chave":     palavras or [],
+        })
+
+    # ══════════════════════════════════════════════════════════════════════
+    elif tipo == "apresentacao_resultado":
+        campos.update({
+            "aprendizados":      paragrafos or linhas[:6],
+            "plano_proximo_mes": bullets[:8],
+            "metas":             [{"kpi": k.title(), "realizado": v, "meta": "", "status": ""}
+                                  for k, v in kv.items()
+                                  if any(x in k for x in ["lead", "cpl", "roas", "cac",
+                                                            "taxa", "resultado"])][:6],
+        })
+
+    return campos
+
+
 # ── Segmentação simples (mantida para compatibilidade) ─────────────────────
 
 def segmentar_texto(texto: str) -> dict:
@@ -907,7 +1146,7 @@ def montar_dados(tipo, cliente, periodo, responsavel,
 
     # ── Relatório Social ──────────────────────────────────────────────────
     elif tipo == "relatorio_social":
-        dados.update({
+        defaults = {
             "seguidores_atual": 0, "seguidores_novos": 0,
             "alcance_total": 0, "impressoes_total": 0,
             "engajamento_medio": "—", "saves_total": 0,
@@ -915,17 +1154,32 @@ def montar_dados(tipo, cliente, periodo, responsavel,
             "insights_semana": linhas_livres,
             "recomendacoes": [],
             "pauta_proxima": [],
-        })
+            "conteudo_livre": [],
+        }
+        dados.update(defaults)
+        if texto_livre:
+            ext = _extrair_por_tipo(texto_livre, tipo, linhas_livres)
+            # só sobrescreve se o extrator encontrou algo real
+            for k, v in ext.items():
+                if v or v == 0:
+                    dados[k] = v
 
     # ── Plano de Mídia ────────────────────────────────────────────────────
     elif tipo == "plano_de_midia":
-        dados.update({
+        defaults = {
             "investimento": 0, "leads_estimados": "—",
             "cpl_estimado_min": 0, "cpl_estimado_max": 0,
             "canais": [], "produtos": [],
             "cronograma": [], "infraestrutura": linhas_livres,
             "precisa_cliente": [], "palavras_chave": [],
-        })
+            "conteudo_livre": [],
+        }
+        dados.update(defaults)
+        if texto_livre:
+            ext = _extrair_por_tipo(texto_livre, tipo, linhas_livres)
+            for k, v in ext.items():
+                if v or v == 0:
+                    dados[k] = v
 
     # ── Resultado Mensal ──────────────────────────────────────────────────
     elif tipo == "apresentacao_resultado":
@@ -955,19 +1209,24 @@ def montar_dados(tipo, cliente, periodo, responsavel,
             "aprendizados": linhas_livres,
             "plano_proximo_mes": [],
             "frase_resumo":   f"R$ {total_inv:.2f} investidos · {total_leads} leads gerados.",
-            "frase_destaque": f"CPL médio R$ {cpl_geral:.2f} · resultado do mês.",
+            "frase_destaque": f"CPL médio R$ {cpl_geral:.2f} · resultado do mes.",
+            "conteudo_livre": [],
         })
+        if texto_livre:
+            ext = _extrair_por_tipo(texto_livre, tipo, linhas_livres)
+            # CSV data tem prioridade; texto enriquece aprendizados, plano e metas
+            if ext.get("aprendizados"):
+                dados["aprendizados"] = ext["aprendizados"]
+            if ext.get("plano_proximo_mes"):
+                dados["plano_proximo_mes"] = ext["plano_proximo_mes"]
+            if ext.get("metas"):
+                dados["metas"] = ext["metas"]
+            dados["conteudo_livre"] = ext.get("conteudo_livre", [])
 
     # ── Ficha de Implantação ──────────────────────────────────────────────
     elif tipo == "ficha_implantacao":
-        # tenta extrair responsáveis do texto livre (padrão "Cargo: Nome")
-        responsaveis = []
-        for linha in linhas_livres:
-            if ":" in linha:
-                partes = linha.split(":", 1)
-                responsaveis.append({"cargo": partes[0].strip(), "nome": partes[1].strip()})
-        dados.update({
-            "responsaveis":        responsaveis,
+        defaults = {
+            "responsaveis":        [],
             "postagens_mensais":   "",
             "formato_prioritario": "",
             "linguagem":           "",
@@ -985,7 +1244,14 @@ def montar_dados(tipo, cliente, periodo, responsavel,
             "obj_curto_prazo":     "",
             "obj_medio_prazo":     "",
             "obj_trafego":         "",
-        })
+            "conteudo_livre":      [],
+        }
+        dados.update(defaults)
+        if texto_livre:
+            ext = _extrair_por_tipo(texto_livre, tipo, linhas_livres)
+            for k, v in ext.items():
+                if v or v == 0:
+                    dados[k] = v
 
     # ── Planejamento Estratégico ──────────────────────────────────────────
     elif tipo == "planejamento_estrategico":
@@ -1009,19 +1275,26 @@ def montar_dados(tipo, cliente, periodo, responsavel,
 
     # ── Proposta Comercial ────────────────────────────────────────────────
     elif tipo == "proposta_comercial":
-        dados.update({
+        defaults = {
             "data_proposta": periodo or "",
             "validade": "30 dias",
             "verba_midia": 0, "honorarios": 0, "total_mensal": 0,
             "diagnostico": linhas_livres,
             "servicos": [], "resultados_esperados": [],
             "diferenciais": [
-                "Gestão especializada em tráfego para segurança eletrônica",
-                "Google Ads + Meta Ads com estratégia de funil completo",
-                "Relatórios semanais com análise de criativos e CPL",
-                "Sem mensalidade oculta · transparência total nos resultados",
+                "Gestao especializada em trafego para seguranca eletronica",
+                "Google Ads + Meta Ads com estrategia de funil completo",
+                "Relatorios semanais com analise de criativos e CPL",
+                "Sem mensalidade oculta · transparencia total nos resultados",
             ],
             "proximos_passos": [],
-        })
+            "conteudo_livre": [],
+        }
+        dados.update(defaults)
+        if texto_livre:
+            ext = _extrair_por_tipo(texto_livre, tipo, linhas_livres)
+            for k, v in ext.items():
+                if v or v == 0:
+                    dados[k] = v
 
     return dados

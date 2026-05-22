@@ -16,7 +16,7 @@ from brand.design_system import (
     W, H, CW, MARGIN,
     NAVY, ORANGE, GRAY_LINE, GRAY_DARK, WHITE,
     LOGO_PATH, S, style,
-    draw_footer,
+    draw_footer, render_blocos,
 )
 from reportlab.lib import colors
 
@@ -220,6 +220,14 @@ def gerar(dados: dict, output_path: str):
         story.append(label_value("Medio prazo:", d["obj_medio_prazo"]))
     if d.get("obj_trafego"):
         story.append(label_value("Trafego:", d["obj_trafego"]))
+
+    # conteudo colado pelo usuario
+    blocos_livres = d.get("conteudo_livre", [])
+    if blocos_livres:
+        story.append(sp(5))
+        story.append(section_title("INFORMACOES ADICIONAIS"))
+        story.append(sp(2))
+        story.extend(render_blocos(blocos_livres))
 
     # callbacks de página
     def on_page(canvas, doc):

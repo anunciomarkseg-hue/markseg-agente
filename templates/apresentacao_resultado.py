@@ -13,7 +13,7 @@ from brand.design_system import (
     S, PageHeader, SectionHeader, MetricCard, InsightBox, TagBadge,
     make_cards_row, table_style_default, table_total_row,
     chart_barras_horizontais, chart_donut, chart_barras_verticais_duplas,
-    draw_footer, draw_cover
+    draw_footer, draw_cover, render_blocos
 )
 
 
@@ -196,14 +196,31 @@ def gerar(dados: dict, output_path: str):
             Paragraph("IMPACTO ESPERADO", S["th"]),
         ]]
         for p in d["plano_proximo_mes"]:
-            pl_rows.append([
-                Paragraph(p.get("acao",""), S["td_bold"]),
-                Paragraph(p.get("canal",""), S["td"]),
-                Paragraph(p.get("impacto_esperado",""), S["td_green"]),
-            ])
+            # suporta dicts com "acao"/"canal"/"impacto_esperado"
+            # e strings simples vindas de linhas de texto
+            if isinstance(p, dict):
+                pl_rows.append([
+                    Paragraph(p.get("acao",""), S["td_bold"]),
+                    Paragraph(p.get("canal",""), S["td"]),
+                    Paragraph(p.get("impacto_esperado",""), S["td_green"]),
+                ])
+            else:
+                pl_rows.append([
+                    Paragraph(str(p), S["td_bold"]),
+                    Paragraph("", S["td"]),
+                    Paragraph("", S["td"]),
+                ])
         pl_t = Table(pl_rows, colWidths=[80*mm, 30*mm, 68*mm], repeatRows=1)
         pl_t.setStyle(table_style_default())
         story.append(pl_t)
+
+    # conteudo colado pelo usuario
+    blocos_livres = d.get("conteudo_livre", [])
+    if blocos_livres:
+        story.append(Spacer(1, 5 * mm))
+        story.append(SectionHeader(0, "INFORMACOES ADICIONAIS"))
+        story.append(Spacer(1, 3 * mm))
+        story.extend(render_blocos(blocos_livres))
 
     def on_first(canvas, doc):
         draw_cover(canvas, doc,

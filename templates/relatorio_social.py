@@ -13,7 +13,7 @@ from brand.design_system import (
     S, PageHeader, SectionHeader, MetricCard, InsightBox, TagBadge,
     make_cards_row, table_style_default, table_total_row,
     chart_barras_horizontais, chart_barras_verticais_duplas,
-    draw_footer, draw_cover
+    draw_footer, draw_cover, render_blocos
 )
 
 
@@ -197,6 +197,14 @@ def gerar(dados: dict, output_path: str):
     if d.get("recomendacoes"):
         story.append(InsightBox("RECOMENDACOES ESTRATEGICAS",
                                 d["recomendacoes"]))
+
+    # conteudo colado pelo usuario (texto estruturado em blocos)
+    blocos_livres = d.get("conteudo_livre", [])
+    if blocos_livres:
+        story.append(Spacer(1, 5 * mm))
+        story.append(SectionHeader(0, "INFORMACOES ADICIONAIS"))
+        story.append(Spacer(1, 3 * mm))
+        story.extend(render_blocos(blocos_livres))
 
     def on_first(canvas, doc):
         draw_cover(canvas, doc,

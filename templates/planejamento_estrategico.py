@@ -16,7 +16,7 @@ from brand.design_system import (
     W, H, CW, MARGIN,
     NAVY, ORANGE, BLUE, GREEN, GRAY_BG, GRAY_LINE, GRAY_DARK, WHITE,
     S, style, PageHeader, SectionHeader,
-    draw_footer, draw_cover,
+    draw_footer, draw_cover, render_blocos,
 )
 
 # estilos locais
@@ -145,9 +145,7 @@ def gerar(dados: dict, output_path: str):
     if not blocos:
         story.append(Paragraph("Nenhum conteudo fornecido.", S_BODY))
     else:
-        for bloco in blocos:
-            elements = _render_bloco(bloco)
-            story.extend(elements)
+        story.extend(render_blocos(blocos, cw=CW))
 
     def on_first(canvas, doc):
         draw_cover(canvas, doc,

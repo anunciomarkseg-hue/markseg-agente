@@ -12,7 +12,7 @@ from brand.design_system import (
     NAVY, ORANGE, BLUE, GREEN, RED, GRAY_BG, GRAY_LINE, WHITE,
     S, PageHeader, SectionHeader, MetricCard, InsightBox, TagBadge,
     make_cards_row, table_style_default, table_total_row,
-    draw_footer, draw_cover
+    draw_footer, draw_cover, render_blocos
 )
 
 
@@ -184,6 +184,14 @@ def gerar(dados: dict, output_path: str):
         ("BOTTOMPADDING", (0,0), (-1,-1), 3*mm),
     ]))
     story.append(assina)
+
+    # conteudo colado pelo usuario
+    blocos_livres = d.get("conteudo_livre", [])
+    if blocos_livres:
+        story.append(Spacer(1, 5 * mm))
+        story.append(SectionHeader(0, "INFORMACOES ADICIONAIS"))
+        story.append(Spacer(1, 3 * mm))
+        story.extend(render_blocos(blocos_livres))
 
     def on_first(canvas, doc):
         draw_cover(canvas, doc,

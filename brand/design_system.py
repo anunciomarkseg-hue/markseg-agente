@@ -638,3 +638,121 @@ def draw_cover(canvas, doc, titulo_doc, subtitulo_doc,
     canvas.drawRightString(W - MARGIN, 3 * mm, "PAG. 01")
 
     canvas.restoreState()
+
+
+# ── Renderizador de blocos de texto livre (usado por todos os templates) ───
+
+_S_BLK_TITULO  = style("blk_titulo",  size=13, bold=True,  color=NAVY)
+_S_BLK_SUBSEC  = style("blk_subsec",  size=10, bold=True,  color=NAVY)
+_S_BLK_BODY    = style("blk_body",    size=9,  color=GRAY_DARK, leading=14)
+_S_BLK_BULLET  = style("blk_bullet",  size=9,  color=GRAY_DARK, leading=14)
+_S_BLK_KV_VAL  = style("blk_kv_val",  size=9,  color=GRAY_DARK, leading=13)
+_S_BLK_TH      = style("blk_th",      size=8,  bold=True,  color=WHITE)
+_S_BLK_TD      = style("blk_td",      size=8,  color=GRAY_DARK, leading=12)
+
+
+def render_blocos(blocos: list, cw: float = None) -> list:
+    """
+    Converte lista de blocos (saida de parse_texto_completo) em flowables ReportLab.
+    Parametro cw: largura disponivel em pontos (padrao: CW).
+    Retorna lista de flowables pronta para adicionar ao story.
+    """
+    if cw is None:
+        cw = CW
+    out = []
+
+    for bloco in blocos:
+        tipo = bloco.get("tipo", "texto")
+
+        if tipo == "titulo":
+            out.append(Spacer(1, 3 * mm))
+            out.append(Paragraph(bloco.get("texto", ""), _S_BLK_TITULO))
+            out.append(Spacer(1, 2 * mm))
+
+        elif tipo == "secao":
+            out.append(Spacer(1, 3 * mm))
+            num  = bloco.get("numero", "")
+            txt  = bloco.get("texto", "")
+            faixa = Table(
+                [[Paragraph(f"{num}. {txt}" if num else txt, _S_BLK_SUBSEC)]],
+                colWidths=[cw],
+            )
+            faixa.setStyle(TableStyle([
+                ("BACKGROUND",    (0, 0), (-1, -1), NAVY),
+                ("LEFTPADDING",   (0, 0), (-1, -1), 4 * mm),
+                ("TOPPADDING",    (0, 0), (-1, -1), 2.5 * mm),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5 * mm),
+            ]))
+            out.append(faixa)
+            out.append(Spacer(1, 2 * mm))
+
+        elif tipo == "subsecao":
+            out.append(Spacer(1, 2 * mm))
+            faixa = Table(
+                [[Paragraph(bloco.get("texto", "").upper(), _S_BLK_SUBSEC)]],
+                colWidths=[cw],
+            )
+            faixa.setStyle(TableStyle([
+                ("BACKGROUND",    (0, 0), (-1, -1), GRAY_BG),
+                ("LEFTPADDING",   (0, 0), (-1, -1), 4 * mm),
+                ("TOPPADDING",    (0, 0), (-1, -1), 2.5 * mm),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5 * mm),
+                ("LINEBELOW",     (0, 0), (-1, -1), 1.5, ORANGE),
+            ]))
+            out.append(faixa)
+            out.append(Spacer(1, 2 * mm))
+
+        elif tipo == "tabela":
+            cab  = bloco.get("cabecalho", [])
+            rows = bloco.get("linhas", [])
+            if not cab and not rows:
+                continue
+            ncols = max(len(cab), max((len(r) for r in rows), default=0))
+            if ncols == 0:
+                continue
+            col_w  = cw / ncols
+            col_ws = [col_w] * ncols
+
+            def pad(r, n=ncols):
+                return r + [""] * (n - len(r))
+
+            trows = []
+            if cab:
+                trows.append([Paragraph(str(c), _S_BLK_TH) for c in pad(cab)])
+            for r in rows:
+                trows.append([Paragraph(str(c), _S_BLK_TD) for c in pad(r)])
+
+            t = Table(trows, colWidths=col_ws, repeatRows=1 if cab else 0)
+            t.setStyle(TableStyle([
+                ("BACKGROUND",    (0, 0), (-1, 0),  NAVY),
+                ("ROWBACKGROUNDS",(0, 1), (-1, -1), [WHITE, GRAY_BG]),
+                ("GRID",          (0, 0), (-1, -1), 0.3, GRAY_LINE),
+                ("VALIGN",        (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING",   (0, 0), (-1, -1), 3 * mm),
+                ("RIGHTPADDING",  (0, 0), (-1, -1), 2 * mm),
+                ("TOPPADDING",    (0, 0), (-1, -1), 2 * mm),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2 * mm),
+            ]))
+            out.append(t)
+            out.append(Spacer(1, 3 * mm))
+
+        elif tipo == "bullets":
+            for item in bloco.get("itens", []):
+                out.append(Paragraph(f"<bullet>&bull;</bullet> {item}",
+                                     _S_BLK_BULLET))
+            out.append(Spacer(1, 2 * mm))
+
+        elif tipo == "keyvalues":
+            for kv in bloco.get("itens", []):
+                chave = kv.get("chave", "")
+                valor = kv.get("valor", "")
+                out.append(Paragraph(f"<b>{chave}:</b> {valor}", _S_BLK_KV_VAL))
+            out.append(Spacer(1, 2 * mm))
+
+        elif tipo == "texto":
+            for ln in bloco.get("linhas", []):
+                if ln.strip():
+                    out.append(Paragraph(ln, _S_BLK_BODY))
+            out.append(Spacer(1, 2 * mm))
+
+    return out
