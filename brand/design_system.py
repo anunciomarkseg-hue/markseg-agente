@@ -385,6 +385,10 @@ def chart_donut(dados, largura_mm, altura_mm, titulo=None):
     start = 90
     for rot, val, cor in dados:
         sweep = -(val / total) * 360
+        # Wedge com ângulo 0 ou ±360 causa ZeroDivisionError no ReportLab
+        if abs(sweep) < 0.5 or abs(abs(sweep) - 360) < 0.5:
+            start += sweep
+            continue
         d.add(Wedge(cx, cy, r_o, start + sweep, start,
                     fillColor=cor, strokeColor=WHITE, strokeWidth=1.5))
         start += sweep
