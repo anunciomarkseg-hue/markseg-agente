@@ -389,25 +389,51 @@ def gerar(dados: dict, output_path: str):
     # seção – próximos passos
     story.append(SectionHeader(_sec_num, "PRÓXIMOS PASSOS · SEMANA SEGUINTE"))
     story.append(Spacer(1, 4 * mm))
+    _sec_num += 1
 
-    # ACAO(75) + RESPONSAVEL(32) + PRAZO(22) + IMPACTO(41) = 170
-    pp_rows = [[
-        Paragraph("AÇÃO",        S["th"]),
-        Paragraph("RESPONSÁVEL", S["th"]),
-        Paragraph("PRAZO",       S["th"]),
-        Paragraph("IMPACTO",     S["th"]),
-    ]]
-    for pp in d.get("proximos_passos", []):
-        pp_rows.append([
-            Paragraph(pp.get("acao", ""), S["td_bold"]),
-            Paragraph(pp.get("responsavel", ""), S["td"]),
-            Paragraph(pp.get("prazo", ""), S["td_orange"]),
-            Paragraph(pp.get("impacto", ""), S["td"]),
-        ])
-    pp_t = Table(pp_rows, colWidths=[75*mm, 32*mm, 22*mm, 41*mm], repeatRows=1)
-    pp_t.setStyle(table_style_default())
-    story.append(pp_t)
+    proximos = d.get("proximos_passos", [])
+    if proximos:
+        # ACAO(75) + RESPONSAVEL(32) + PRAZO(22) + IMPACTO(41) = 170
+        pp_rows = [[
+            Paragraph("AÇÃO",        S["th"]),
+            Paragraph("RESPONSÁVEL", S["th"]),
+            Paragraph("PRAZO",       S["th"]),
+            Paragraph("IMPACTO",     S["th"]),
+        ]]
+        for pp in proximos:
+            pp_rows.append([
+                Paragraph(pp.get("acao", ""), S["td_bold"]),
+                Paragraph(pp.get("responsavel", ""), S["td"]),
+                Paragraph(pp.get("prazo", ""), S["td_orange"]),
+                Paragraph(pp.get("impacto", ""), S["td"]),
+            ])
+        pp_t = Table(pp_rows, colWidths=[75*mm, 32*mm, 22*mm, 41*mm], repeatRows=1)
+        pp_t.setStyle(table_style_default())
+        story.append(pp_t)
+    else:
+        story.append(Paragraph(
+            "Sem ações registradas para a semana seguinte.", S["td"]))
     story.append(Spacer(1, 3 * mm))
+
+    # seção – informações adicionais (texto livre do formulário)
+    obs = d.get("observacoes_extras", [])
+    if obs:
+        story.append(SectionHeader(_sec_num, "INFORMAÇÕES ADICIONAIS"))
+        story.append(Spacer(1, 4 * mm))
+        obs_t = Table(
+            [[Paragraph(f"•  {linha}", S["insight"])] for linha in obs],
+            colWidths=[CW],
+        )
+        obs_t.setStyle(TableStyle([
+            ("BACKGROUND",    (0,0), (-1,-1), NAVY),
+            ("LEFTPADDING",   (0,0), (-1,-1), 4 * mm),
+            ("RIGHTPADDING",  (0,0), (-1,-1), 4 * mm),
+            ("TOPPADDING",    (0,0), (-1,-1), 2 * mm),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 2 * mm),
+        ]))
+        story.append(obs_t)
+        story.append(Spacer(1, 3 * mm))
+        _sec_num += 1
 
     # faixa de retorno
     ret_t = Table([[Paragraph(

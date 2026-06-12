@@ -604,6 +604,44 @@ def extrair_do_texto(texto: str) -> dict:
     return d
 
 
+def extrair_proximos_passos(texto: str) -> tuple:
+    """
+    Procura um bloco 'Plano de ação:' / 'Próximos passos:' no texto livre
+    e converte o conteúdo em itens de ação para a tabela de próximos passos.
+    Retorna (lista_de_acoes, texto_restante) — o restante é o que veio
+    ANTES do marcador (vai para a seção de observações).
+    """
+    if not texto or not texto.strip():
+        return [], ""
+
+    PAT = re.compile(
+        r"(?:plano\s+de\s+a[çc][ãa]o|pr[óo]ximos?\s+passos?|"
+        r"a[çc][õo]es\s+(?:da\s+semana|seguintes?))\s*[:\-–]?\s*",
+        re.I,
+    )
+    m = PAT.search(texto)
+    if not m:
+        return [], texto.strip()
+
+    antes  = texto[:m.start()].strip()
+    depois = texto[m.end():].strip()
+
+    itens = []
+    for linha in depois.split("\n"):
+        l = linha.strip().lstrip("-•·▪*→").strip()
+        if not l:
+            continue
+        # quebra em itens: ponto final seguido de espaço, ou vírgula
+        # seguida de letra maiúscula (novo item na mesma linha)
+        partes = re.split(r"\.\s+|,\s+(?=[A-ZÁÉÍÓÚÃÕÂÊÔÇ])", l)
+        for p in partes:
+            p = p.strip().rstrip(".").strip()
+            p = re.sub(r"^[eE]\s+", "", p)   # remove conjunção inicial "e "
+            if len(p) > 3:
+                itens.append(p[0].upper() + p[1:])
+    return itens, antes
+
+
 # ── Parser completo: texto → blocos estruturados ──────────────────────────
 
 def parse_texto_completo(texto: str) -> list:
@@ -1118,11 +1156,22 @@ def montar_dados(tipo, cliente, periodo, responsavel,
             meta_camp_raw, meta_conj_raw, meta_anun_raw,
             google_raw, dados["periodo"], dados["cliente"]
         )
-        # texto do usuário tem prioridade sobre análise automática
-        insights_meta   = linhas_livres[:2] + analise["insights_meta"] if linhas_livres \
-                          else analise["insights_meta"]
+        insights_meta   = analise["insights_meta"]
         insights_google = analise["insights_google"]
-        proximos        = analise["proximos_passos"]
+
+        # ── Texto livre: plano de ação → tabela de próximos passos ────────
+        # itens do usuário entram primeiro; análise automática complementa.
+        # O que vier antes do marcador vira "Informações Adicionais" no
+        # final do PDF (observacoes_extras).
+        pp_user, texto_restante = extrair_proximos_passos(texto_livre or "")
+        proximos = [
+            {"acao": a, "responsavel": dados["responsavel"],
+             "prazo": "Semana seguinte", "impacto": "—"}
+            for a in pp_user
+        ] + analise["proximos_passos"]
+
+        observacoes = [l.strip().lstrip("-•·▪*").strip()
+                       for l in texto_restante.split("\n") if l.strip()]
 
         g = google_raw
         dados.update({
@@ -1145,6 +1194,7 @@ def montar_dados(tipo, cliente, periodo, responsavel,
             "sugestoes_conteudo": [],
             "estrategia_seguidores": [],
             "proximos_passos": proximos,
+            "observacoes_extras": observacoes,
         })
 
         # frases da capa (texto do usuário ou análise automática)
