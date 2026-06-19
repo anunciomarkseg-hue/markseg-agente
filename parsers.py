@@ -118,16 +118,32 @@ def col(df, *opcoes):
 
 
 def _is_lead_action(indicador_val) -> bool:
-    """Retorna True se o 'Indicador de resultados' é uma conversão real (lead)."""
+    """
+    Retorna True se o 'Indicador de resultados' representa uma conversão real
+    (lead / contato / cadastro / mensagem / compra) — e não alcance, visualização
+    de página, engajamento, vídeo ou cliques.
+    Cobre tanto os códigos técnicos do Meta ('offsite_conversion.*') quanto os
+    nomes em português do export da interface ('Lead Quiz', 'Contato no site',
+    'Múltiplas conversões' etc.).
+    """
     if not indicador_val or str(indicador_val).strip().lower() in ("nan", "", "—", "–"):
         return False
     s = str(indicador_val).lower()
-    # Meta usa "actions:offsite_conversion.*" para leads reais
-    # "omni_landing_page_view", "reach", "post_engagement" NÃO são leads
-    if "conversion" in s or "lead" in s:
-        if "landing_page_view" not in s:
-            return True
-    return False
+
+    # nunca são leads: alcance, impressões, visualizações, engajamento, vídeo…
+    nao_lead = ("landing_page_view", "visualizaç", "visualizacao", "alcance",
+                "reach", "impress", "engaj", "engagement", "post_engagement",
+                "cliques no link", "link_click", "reprodu", "thruplay",
+                "video", "interaç", "interac", "seguidores", "page_like",
+                "curtidas")
+    if any(t in s for t in nao_lead):
+        return False
+
+    # contam como lead/conversão (códigos técnicos + nomes PT da interface)
+    lead_terms = ("conversion", "conversõ", "conversoe", "conversão", "conversao",
+                  "lead", "contato", "contact", "cadastro", "mensagem", "message",
+                  "compra", "purchase", "registration", "agendamento", "checkout")
+    return any(t in s for t in lead_terms)
 
 
 def _is_total_row(row_dict: dict) -> bool:
@@ -196,6 +212,7 @@ def parse_meta_conjuntos(df: pd.DataFrame) -> list:
                       "custo por lead", "cost per result", "cost per lead")
     orc_col   = col(df, "orçamento do conjunto", "orçamento", "budget")
     alc_col   = col(df, "alcance", "reach")
+    impr_col  = col(df, "impressões", "impressions", "impressoes")
     stat_col  = col(df, "veiculação do conjunto", "veiculação", "delivery")
 
     for _, row in df.iterrows():
@@ -221,13 +238,14 @@ def parse_meta_conjuntos(df: pd.DataFrame) -> list:
             cpl_val = round(gasto / leads, 2)
 
         resultado.append({
-            "nome":      nome,
-            "status":    status,
-            "orcamento": num(row.get(orc_col, 0)) if orc_col else 0,
-            "gasto":     gasto,
-            "leads":     leads,
-            "cpl":       cpl_val,
-            "alcance":   inteiro(row.get(alc_col, 0)) if alc_col else 0,
+            "nome":       nome,
+            "status":     status,
+            "orcamento":  num(row.get(orc_col, 0)) if orc_col else 0,
+            "gasto":      gasto,
+            "leads":      leads,
+            "cpl":        cpl_val,
+            "alcance":    inteiro(row.get(alc_col, 0))  if alc_col  else 0,
+            "impressoes": inteiro(row.get(impr_col, 0)) if impr_col else 0,
         })
     return resultado
 
@@ -411,6 +429,76 @@ def parse_google_campanhas(df: pd.DataFrame) -> dict:
     return totais
 
 
+# ── Consolidação multi-nível (campanha + conjunto + anúncio) ────────────────
+
+def _meta_totais(meta_camp, meta_conj, meta_anun) -> dict:
+    """
+    Totais consolidados do Meta a partir do MELHOR nível disponível.
+    Campanha, conjunto e anúncio cobrem o MESMO investimento (um rola pro outro),
+    então usamos o MAIOR total entre os níveis enviados. Isso resolve dois casos
+    em que o resumo executivo zerava os leads/gasto do Meta:
+      • campanha com 'Múltiplas conversões' → o nível campanha não traz o número
+        de leads (Resultados = '—'), mas o conjunto/anúncio traz o número real;
+      • o cliente envia só o relatório de conjuntos (ou só o de anúncios), sem
+        o de campanhas.
+    """
+    def soma(rows, campo):
+        return sum(r.get(campo, 0) for r in rows)
+
+    gasto = max(soma(meta_camp, "gasto"),
+                soma(meta_conj, "gasto"),
+                soma(meta_anun, "gasto"))
+    leads = max(soma(meta_camp, "leads"),
+                soma(meta_conj, "leads"),
+                soma(meta_anun, "leads"))
+    impr  = max(soma(meta_camp, "impressoes"),
+                soma(meta_conj, "impressoes"),
+                soma(meta_anun, "impressoes"))
+    pv    = max(soma(meta_camp, "page_views"),
+                soma(meta_anun, "page_views"))
+    cpl   = round(gasto / leads, 2) if leads else 0
+    return {"gasto": gasto, "leads": leads, "impressoes": impr,
+            "page_views": pv, "cpl": cpl}
+
+
+def _merge_google(acc: dict, novo: dict, eh_campanha: bool) -> dict:
+    """
+    Consolida vários exports do Google (campanhas, palavras-chave, termos) sem
+    duplicar gasto: cada export cobre a mesma conta, então pegamos o MAIOR valor
+    de cada métrica. Garante que gasto E conversões entrem no relatório mesmo
+    quando estão em arquivos diferentes (antes só o arquivo de maior gasto era
+    usado, e as conversões de outro arquivo eram descartadas).
+    """
+    if not acc:
+        out = dict(novo)
+        out["_tem_campanhas"] = eh_campanha and bool(novo.get("campanhas"))
+        return out
+
+    out = dict(acc)
+    for k in ("gasto", "cliques", "impressoes", "conv"):
+        out[k] = max(acc.get(k, 0), novo.get(k, 0))
+
+    # lista de campanhas: prioriza o export de campanhas; senão a maior lista
+    novas = novo.get("campanhas", [])
+    if eh_campanha and (not acc.get("_tem_campanhas") or
+                        len(novas) > len(acc.get("campanhas", []))):
+        out["campanhas"] = novas
+        out["_tem_campanhas"] = True
+    elif not acc.get("_tem_campanhas") and len(novas) > len(acc.get("campanhas", [])):
+        out["campanhas"] = novas
+
+    # recalcula CTR e CPL a partir dos totais consolidados
+    if out.get("impressoes", 0) > 0 and out.get("cliques", 0) > 0:
+        out["ctr"] = f"{out['cliques'] / out['impressoes'] * 100:.2f}%"
+    else:
+        out["ctr"] = acc.get("ctr") or novo.get("ctr") or "0%"
+    if out.get("conv", 0) > 0:
+        out["cpl"] = round(out["gasto"] / out["conv"], 2)
+    else:
+        out["cpl"] = acc.get("cpl") or novo.get("cpl") or 0
+    return out
+
+
 # ── Análise inteligente automática (sem API, baseada em regras de negócio) ──
 
 def _analisar_performance(meta_camp, meta_conj, meta_anun,
@@ -423,11 +511,12 @@ def _analisar_performance(meta_camp, meta_conj, meta_anun,
     - proximos_passos: lista de ações recomendadas
     - frase_resumo / frase_destaque: para a capa
     """
-    meta_gasto  = sum(c["gasto"] for c in meta_camp)
-    meta_leads  = sum(c["leads"] for c in meta_camp)
-    meta_pv     = sum(c.get("page_views", 0) for c in meta_camp)
-    meta_impr   = sum(c.get("impressoes", 0) for c in meta_camp)
-    meta_cpl    = round(meta_gasto / meta_leads, 2) if meta_leads else 0
+    _mt = _meta_totais(meta_camp, meta_conj, meta_anun)
+    meta_gasto  = _mt["gasto"]
+    meta_leads  = _mt["leads"]
+    meta_pv     = _mt["page_views"]
+    meta_impr   = _mt["impressoes"]
+    meta_cpl    = _mt["cpl"]
 
     g_gasto  = google.get("gasto", 0)
     g_cliq   = google.get("cliques", 0)
@@ -1093,14 +1182,17 @@ def montar_dados(tipo, cliente, periodo, responsavel,
             meta_anun_raw.extend(parse_meta_anuncios(df))
         elif tipo_csv in ("google_campanhas", "google_keywords", "google_termos"):
             novo = parse_google_campanhas(df)
-            # usa o arquivo com mais gasto (evita double-count acumulando)
-            if novo.get("gasto", 0) >= google_raw.get("gasto", 0):
-                google_raw = novo
+            # consolida todos os exports do Google (gasto + conversões), sem
+            # duplicar — pega o maior valor de cada métrica entre os arquivos
+            google_raw = _merge_google(
+                google_raw, novo, eh_campanha=(tipo_csv == "google_campanhas"))
             # separa palavras-chave (configuradas) de termos de pesquisa (digitados)
             if tipo_csv == "google_keywords" and not google_kw_top:
                 google_kw_top = parse_google_keywords_top(df, top_n=5)
             elif tipo_csv == "google_termos" and not google_termos_top:
                 google_termos_top = parse_google_keywords_top(df, top_n=5)
+
+    google_raw.pop("_tem_campanhas", None)   # chave interna do merge
 
     # ── Relatório de Performance ──────────────────────────────────────────
     if tipo == "relatorio_performance":
@@ -1136,9 +1228,40 @@ def montar_dados(tipo, cliente, periodo, responsavel,
                 "cpr":   cpr_val,   "impressoes": c["impressoes"],
             })
 
-        meta_total = sum(c["gasto"] for c in meta_camp_raw)
-        meta_leads = sum(c["leads"] for c in meta_camp_raw)
-        meta_cpl   = round(meta_total / meta_leads, 2) if meta_leads else 0
+        # Sem CSV de campanhas (ou só veio o de conjuntos)? Monta a distribuição
+        # do funil a partir dos conjuntos — assim a verba e os leads aparecem
+        # mesmo quando o cliente só enviou o relatório de conjuntos de anúncios.
+        if not campanhas_template and meta_conj_raw:
+            for c in meta_conj_raw:
+                if c.get("gasto", 0) == 0 and c.get("impressoes", 0) == 0:
+                    continue
+                etapa = "FUNDO"
+                for k, v in ETAPA_MAP.items():
+                    if k in c["nome"].lower():
+                        etapa = v
+                        break
+                if c.get("leads", 0) > 0:
+                    result_str = f"{c['leads']} leads"
+                    cpr_val    = c.get("cpl", 0)
+                elif c.get("impressoes", 0) > 0:
+                    result_str = f"{c['impressoes']:,} impr."
+                    cpr_val    = 0
+                else:
+                    result_str = f"{c.get('alcance', 0):,} alc."
+                    cpr_val    = 0
+                campanhas_template.append({
+                    "etapa": etapa, "nome": c["nome"],
+                    "verba": c["gasto"], "resultado": result_str,
+                    "cpr":   cpr_val,   "impressoes": c.get("impressoes", 0),
+                })
+
+        # Totais do Meta consolidados de todos os níveis enviados (campanha +
+        # conjunto + anúncio). Resolve o caso 'Múltiplas conversões' e o envio
+        # de apenas um dos relatórios.
+        _mt = _meta_totais(meta_camp_raw, meta_conj_raw, meta_anun_raw)
+        meta_total = _mt["gasto"]
+        meta_leads = _mt["leads"]
+        meta_cpl   = _mt["cpl"]
 
         # ── Top 5 criativos (leads primeiro, depois por gasto) ────────────
         cri_com_lead = sorted(
@@ -1241,9 +1364,10 @@ def montar_dados(tipo, cliente, periodo, responsavel,
 
     # ── Resultado Mensal ──────────────────────────────────────────────────
     elif tipo == "apresentacao_resultado":
-        meta_total = sum(c["gasto"] for c in meta_camp_raw)
-        meta_leads = sum(c["leads"] for c in meta_camp_raw)
-        meta_cpl   = round(meta_total / meta_leads, 2) if meta_leads else 0
+        _mt = _meta_totais(meta_camp_raw, meta_conj_raw, meta_anun_raw)
+        meta_total = _mt["gasto"]
+        meta_leads = _mt["leads"]
+        meta_cpl   = _mt["cpl"]
         g_gasto    = google_raw.get("gasto", 0)
         g_leads    = google_raw.get("conv", 0)
         total_inv  = meta_total + g_gasto
