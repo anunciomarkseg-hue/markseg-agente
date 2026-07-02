@@ -502,7 +502,8 @@ def _merge_google(acc: dict, novo: dict, eh_campanha: bool) -> dict:
 # ── Análise inteligente automática (sem API, baseada em regras de negócio) ──
 
 def _analisar_performance(meta_camp, meta_conj, meta_anun,
-                          google, periodo: str, cliente: str) -> dict:
+                          google, periodo: str, cliente: str,
+                          responsavel: str = "Rafael") -> dict:
     """
     Lê os dados parseados e gera:
     - resumo_executivo: 2-3 frases sobre o período
@@ -621,25 +622,25 @@ def _analisar_performance(meta_camp, meta_conj, meta_anun,
     if venc and venc.get("leads", 0) > 0:
         proximos.append({
             "acao": f"Escalar orçamento do criativo '{venc['nome'][:35]}'",
-            "responsavel": "Rafael", "prazo": "3 dias",
+            "responsavel": responsavel, "prazo": "3 dias",
             "impacto": "Aumentar volume de leads mantendo CPL",
         })
     if meta_leads == 0 and meta_gasto > 0:
         proximos.append({
             "acao": "Ativar campanha de fundo de funil (leads diretos)",
-            "responsavel": "Rafael", "prazo": "Esta semana",
+            "responsavel": responsavel, "prazo": "Esta semana",
             "impacto": "Começar a capturar leads qualificados",
         })
     if g_conv == 0 and g_cliq > 0:
         proximos.append({
             "acao": "Verificar tracking de conversão Google (GA4 + GTM)",
-            "responsavel": "Rafael / Cliente", "prazo": "Urgente",
+            "responsavel": f"{responsavel} / Cliente", "prazo": "Urgente",
             "impacto": "Dados de conversão precisos para otimização",
         })
     if fase == "otimização":
         proximos.append({
             "acao": "Testar novo criativo para reduzir CPL",
-            "responsavel": "Rafael", "prazo": "7 dias",
+            "responsavel": responsavel, "prazo": "7 dias",
             "impacto": f"CPL atual R$ {meta_cpl:.2f} · meta abaixo de R$ 60",
         })
 
@@ -1151,7 +1152,7 @@ def montar_dados(tipo, cliente, periodo, responsavel,
     dados = {
         "cliente":     cliente or "Cliente",
         "periodo":     periodo or "",
-        "agencia":     "MarkSeg Tráfego · Rafael",
+        "agencia":     f"MarkSeg Tráfego · {responsavel or 'Rafael'}",
         "responsavel": responsavel or "Rafael",
         "info_capa":   f"Análise de performance · {periodo}",
         "frase_resumo":    "",
@@ -1277,7 +1278,8 @@ def montar_dados(tipo, cliente, periodo, responsavel,
         # ── Análise automática inteligente ────────────────────────────────
         analise = _analisar_performance(
             meta_camp_raw, meta_conj_raw, meta_anun_raw,
-            google_raw, dados["periodo"], dados["cliente"]
+            google_raw, dados["periodo"], dados["cliente"],
+            dados["responsavel"]
         )
         insights_meta   = analise["insights_meta"]
         insights_google = analise["insights_google"]

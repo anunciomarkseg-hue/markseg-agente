@@ -254,6 +254,46 @@ texto_livre = st.text_area(
 
 st.markdown("")
 
+# ── Próximos passos sugeridos (você escolhe o que entra no PDF) ────────────
+# Pré-processa os dados já no carregamento para trazer as recomendações antes
+# de gerar. As recomendações NÃO entram sozinhas no PDF: só as marcadas abaixo.
+dados = None
+proximos_sugeridos = []
+if dfs or textos_extras or texto_livre:
+    try:
+        from parsers import montar_dados
+        dados = montar_dados(
+            tipo=tipo, cliente=cliente, periodo=periodo,
+            responsavel=responsavel, dfs=dfs, textos=textos_extras,
+            texto_livre=texto_livre,
+        )
+        proximos_sugeridos = dados.get("proximos_passos", []) or []
+    except Exception:
+        dados, proximos_sugeridos = None, []
+
+sel_proximos = []
+if proximos_sugeridos:
+    import re as _re
+    st.markdown('<div class="sec-title">PRÓXIMOS PASSOS · ESCOLHA O QUE ENTRA NO PDF</div>',
+                unsafe_allow_html=True)
+    st.markdown('<div class="tip">Trouxemos estas recomendações com base nos dados carregados. '
+                'Marque as que devem entrar no relatório — as desmarcadas não aparecem no PDF.</div>',
+                unsafe_allow_html=True)
+    for i, pp in enumerate(proximos_sugeridos):
+        partes = [str(pp.get("acao", "")).strip()]
+        if pp.get("prazo"):
+            partes.append(f"⏱ {pp['prazo']}")
+        if pp.get("impacto") and str(pp["impacto"]).strip() not in ("", "—"):
+            partes.append(f"🎯 {pp['impacto']}")
+        label = "  ·  ".join(p for p in partes if p)
+        slug = _re.sub(r"[^a-z0-9]+", "_", str(pp.get("acao", "")).lower())[:40]
+        if st.checkbox(label, value=True, key=f"pp_{i}_{slug}"):
+            sel_proximos.append(pp)
+    if not sel_proximos:
+        st.caption("⚠️ Nenhum próximo passo marcado — o relatório sai sem essa seção.")
+
+st.markdown("")
+
 # ── Gerar ─────────────────────────────────────────────────────────────────
 gerar = st.button("⚡ Gerar PDF")
 
@@ -264,18 +304,26 @@ if gerar:
 
     with st.spinner("Processando arquivos e gerando PDF..."):
         try:
-            from parsers import montar_dados
             import importlib
 
-            dados = montar_dados(
-                tipo=tipo,
-                cliente=cliente,
-                periodo=periodo,
-                responsavel=responsavel,
-                dfs=dfs,
-                textos=textos_extras,
-                texto_livre=texto_livre,
-            )
+            # reaproveita os dados já processados no carregamento; recalcula
+            # apenas se necessário (ex.: gerou sem nenhum arquivo/texto antes)
+            if dados is None:
+                from parsers import montar_dados
+                dados = montar_dados(
+                    tipo=tipo,
+                    cliente=cliente,
+                    periodo=periodo,
+                    responsavel=responsavel,
+                    dfs=dfs,
+                    textos=textos_extras,
+                    texto_livre=texto_livre,
+                )
+
+            # aplica a seleção feita nos checkboxes: só os próximos passos
+            # marcados entram no PDF (os demais ficam de fora)
+            if proximos_sugeridos:
+                dados["proximos_passos"] = sel_proximos
 
             mod = importlib.import_module(f"templates.{tipo}")
             with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False,
