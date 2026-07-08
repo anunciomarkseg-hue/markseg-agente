@@ -471,7 +471,7 @@ def chart_donut(dados, largura_mm, altura_mm, titulo=None):
                      fontName="Helvetica-Bold", fontSize=8, fillColor=NAVY))
         # valor na linha abaixo
         d.add(String(lx + 5 * mm, ly - 5,
-                     f"R$ {val:,.2f}  ({pct:.0f}%)".replace(",", "."),
+                     f"R$ {val:,.0f}  ({pct:.0f}%)".replace(",", "."),
                      fontName="Helvetica", fontSize=7, fillColor=GRAY_DARK))
 
     return d

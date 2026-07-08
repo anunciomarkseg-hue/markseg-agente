@@ -1144,6 +1144,200 @@ def segmentar_texto(texto: str) -> dict:
     return secoes
 
 
+# ── Parser do Plano de Mídia (14 seções numeradas · sem API) ───────────────
+
+# títulos canônicos das 14 seções (usados no PDF, independem de como o
+# usuário escreveu o cabeçalho no briefing)
+_PM_TITULOS = {
+    1:  "Cliente e contexto",
+    2:  "Produto",
+    3:  "Desafio estratégico",
+    4:  "Diferenciais e provas",
+    5:  "Público-alvo",
+    6:  "Posicionamento e mensagem",
+    7:  "Objetivo de mídia",
+    8:  "Estratégia e verba",
+    9:  "Estrutura de campanhas · funil",
+    10: "Plano de criativos",
+    11: "Rastreio e integrações",
+    12: "Cronograma",
+    13: "KPIs e metas",
+    14: "Premissas e pendências",
+}
+
+# linha que começa com "N. ", "N) ", "N - " → cabeçalho de seção
+_PM_SEC_RE = re.compile(r"^\s*(\d{1,2})\s*[\.\)\-–—]\s*(.{2,})$")
+
+
+def _pm_num(txt: str) -> float:
+    """Primeiro valor monetário/numérico de um texto (formato BR)."""
+    m = re.search(r"R?\$?\s*(\d[\d\.\,]*)", txt)
+    if not m:
+        return 0.0
+    v = m.group(1).rstrip(".,")
+    if "," in v:                       # 1.800,00 → 1800.00
+        v = v.replace(".", "").replace(",", ".")
+    else:                              # 1.800 → 1800 ; 1800 → 1800
+        v = v.replace(".", "")
+    try:
+        return float(v)
+    except ValueError:
+        return 0.0
+
+
+def _pm_bullets(linhas: list) -> list:
+    """Remove marcadores de bullet e linhas vazias."""
+    out = []
+    for l in linhas:
+        c = l.lstrip("-•·▪*—–>◦⏳✅⚠️ ").strip()
+        if c:
+            out.append(c)
+    return out
+
+
+def _pm_dividir_secoes(texto: str) -> dict:
+    """Quebra o briefing em {numero: [linhas]} pelos cabeçalhos numerados."""
+    secoes, atual = {}, None
+    for raw in texto.splitlines():
+        s = raw.strip()
+        if not s:
+            continue
+        m = _PM_SEC_RE.match(s)
+        if m and 1 <= int(m.group(1)) <= 14:
+            atual = int(m.group(1))
+            secoes.setdefault(atual, [])
+        elif atual is not None:
+            secoes[atual].append(s)
+    return secoes
+
+
+def _pm_canais(linhas: list, investimento: float) -> list:
+    """
+    Melhor esforço para a tabela de verba. Reconhece linhas com canal + R$.
+    Ignora a linha 'verba total' e a linha-pai que diz 'dividido em' (usa os
+    filhos ~R$). Se a soma não bater com o investimento (~), descarta a tabela
+    para não mostrar número errado — o texto ainda aparece nos tópicos.
+    """
+    canais, parent = [], None
+    for l in linhas:
+        low = l.lower()
+        if "verba total" in low or "investimento total" in low or "verba de" in low:
+            continue
+        plat = None
+        if any(x in low for x in ("meta", "instagram", "facebook", "lead ads")):
+            plat = "Meta"
+        elif any(x in low for x in ("google", "search", "pmax", "categoria", "marca", "busca")):
+            plat = "Google"
+        if "dividido" in low:                     # linha-pai agregada → pula valor
+            parent = plat or parent
+            continue
+        if not re.search(r"r\$\s*\d", low):
+            continue
+        verba = _pm_num(l)
+        if verba <= 0:
+            continue
+        etapa = plat or parent or "Reserva"
+        # nome do canal: rótulo depois de um traço "— Marca (defesa):" ou antes de : / =
+        m = re.search(r"[—–-]\s*([^:]{2,40}):", l)
+        if m:
+            nome = m.group(1).strip()
+        else:
+            nome = re.split(r"[:=]", l, 1)[0]
+            nome = re.sub(r"[~\-\s]*R?\$?\s*[\d\.\,]+.*", "", nome).strip()
+        nome = nome or etapa
+        func = l.split(":", 1)[1].strip() if ":" in l else ""
+        canais.append({
+            "etapa": etapa, "canal": nome[:34], "funcao": func[:70],
+            "verba": verba,
+            "percentual": round(verba / investimento * 100) if investimento else 0,
+        })
+    if canais and investimento:
+        tot = sum(c["verba"] for c in canais)
+        if tot < investimento * 0.6 or tot > investimento * 1.6:
+            return []                              # pouco confiável → sem tabela
+    return canais
+
+
+def _pm_cronograma(linhas: list) -> list:
+    """Linhas 'Semana X: a; b; c' ou 'Mês 2: ...' → grade do cronograma."""
+    out = []
+    for l in linhas:
+        if ":" not in l:
+            continue
+        k, v = l.split(":", 1)
+        if re.match(r"\s*(semana|m[êe]s|fase|etapa)\b", k.strip().lower()):
+            itens = [x.strip() for x in re.split(r"[;•]|\s\+\s", v) if x.strip()]
+            out.append({"semana": k.strip(), "itens": itens or [v.strip()]})
+    return out
+
+
+def parse_plano_midia_texto(texto: str) -> dict:
+    """
+    Converte o briefing colado (14 seções numeradas) no dict do template.
+    100% local, sem API. Quanto mais o texto seguir o formato numerado, mais
+    limpo sai o PDF; o que não for reconhecido ainda aparece como tópicos.
+    """
+    d = {
+        "info_capa": "", "frase_resumo": "", "frase_destaque": "",
+        "investimento": 0, "leads_estimados": "—",
+        "cpl_estimado_min": 0, "cpl_estimado_max": 0,
+        "secoes": [], "canais": [], "cronograma": [],
+        "palavras_chave": [], "conteudo_livre": [],
+    }
+    if not texto or not texto.strip():
+        return d
+
+    secoes = _pm_dividir_secoes(texto)
+
+    # sem numeração reconhecida → mostra tudo numa seção só (não perde nada)
+    if not secoes:
+        d["secoes"] = [{
+            "num": 1, "titulo": "Briefing",
+            "linhas": _pm_bullets(texto.splitlines()),
+        }]
+        return d
+
+    for num in sorted(secoes):
+        linhas = _pm_bullets(secoes[num])
+        if linhas:
+            d["secoes"].append({
+                "num": num,
+                "titulo": _PM_TITULOS.get(num, f"Seção {num}"),
+                "linhas": linhas,
+            })
+
+    sec = {s["num"]: s["linhas"] for s in d["secoes"]}
+
+    # seção 8 → investimento total + tabela de canais
+    if 8 in sec:
+        for l in sec[8]:
+            if re.search(r"(verba|investimento)\s+total", l.lower()):
+                d["investimento"] = _pm_num(l)
+                break
+        if not d["investimento"]:
+            for l in sec[8]:
+                if re.search(r"r\$\s*\d", l.lower()):
+                    d["investimento"] = _pm_num(l)
+                    break
+        d["canais"] = _pm_canais(sec[8], d["investimento"])
+
+    # seção 12 → cronograma
+    if 12 in sec:
+        d["cronograma"] = _pm_cronograma(sec[12])
+
+    # CPL mín/máx (faixa "R$15-50") e leads — procura na seção 13, senão global
+    alvo = " ".join(sec.get(13, [])) or texto
+    faixa = re.search(r"R\$\s*(\d+)\s*[-–a]\s*R?\$?\s*(\d+)", alvo)
+    if faixa:
+        d["cpl_estimado_min"] = float(faixa.group(1))
+        d["cpl_estimado_max"] = float(faixa.group(2))
+    mleads = re.search(r"(\d[\d\.\s]*a\s*\d[\d\.]*|\d[\d\.]{2,})\s*leads", alvo.lower())
+    if mleads:
+        d["leads_estimados"] = mleads.group(1).strip()
+
+    return d
+
+
 # ── Montador principal ─────────────────────────────────────────────────────
 
 def montar_dados(tipo, cliente, periodo, responsavel,
@@ -1349,20 +1543,14 @@ def montar_dados(tipo, cliente, periodo, responsavel,
 
     # ── Plano de Mídia ────────────────────────────────────────────────────
     elif tipo == "plano_de_midia":
-        defaults = {
-            "investimento": 0, "leads_estimados": "—",
-            "cpl_estimado_min": 0, "cpl_estimado_max": 0,
-            "canais": [], "produtos": [],
-            "cronograma": [], "infraestrutura": linhas_livres,
-            "precisa_cliente": [], "palavras_chave": [],
-            "conteudo_livre": [],
-        }
-        dados.update(defaults)
-        if texto_livre:
-            ext = _extrair_por_tipo(texto_livre, tipo, linhas_livres)
-            for k, v in ext.items():
-                if v or v == 0:
-                    dados[k] = v
+        dados["info_capa"] = f"Plano de mídia · {periodo}" if periodo else "Plano de mídia"
+
+        # briefing completo = arquivos enviados + texto livre (sem API, 100% local)
+        brief = "\n\n".join(
+            list(textos or []) + ([texto_livre] if texto_livre else [])
+        ).strip()
+
+        dados.update(parse_plano_midia_texto(brief))
 
     # ── Resultado Mensal ──────────────────────────────────────────────────
     elif tipo == "apresentacao_resultado":
