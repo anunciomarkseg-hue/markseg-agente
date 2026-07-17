@@ -75,6 +75,14 @@ def detectar_tipo_csv(df: pd.DataFrame) -> str:
     cols = [str(c).lower() for c in df.columns]
     cols_set = set(cols)
 
+    # ── LinkedIn Ads ──────────────────────────────────────────────────────
+    # Precisa vir ANTES do Meta: o export de criativos do LinkedIn tem
+    # "Nome do anúncio" e o de campanhas tem "Nome da campanha", que casariam
+    # com o Meta por engano. A coluna "Total investido" é exclusiva do LinkedIn
+    # (Meta usa "Valor usado", Google usa "Custo").
+    if any("total investido" in c for c in cols):
+        return "linkedin"
+
     # ── Meta Ads ──────────────────────────────────────────────────────────
     # Identifica pelo campo mais específico (de mais específico para menos)
     if any("nome do anúncio" in c or "ad name" in c for c in cols):
@@ -429,6 +437,113 @@ def parse_google_campanhas(df: pd.DataFrame) -> dict:
     return totais
 
 
+# ── Parser LinkedIn Ads ────────────────────────────────────────────────────
+
+def parse_linkedin(df: pd.DataFrame) -> dict:
+    """
+    Agrega qualquer export do LinkedIn Ads (relatório de anúncios/criativos ou
+    de campanhas/conjuntos). Soma as linhas em totais da conta e monta a lista
+    de campanhas. Os valores vêm em formato BR entre aspas ("688,45", "0,482%").
+    """
+    nome_col  = col(df, "nome da campanha", "campaign name")
+    gasto_col = col(df, "total investido", "amount spent", "total spent")
+    impr_col  = col(df, "impressões", "impressions", "impressoes")
+    cliq_col  = col(df, "cliques", "clicks")
+    conv_col  = col(df, "conversões", "conversions", "conversoes")
+    leads_col = col(df, "leads")
+    cpl_col   = col(df, "custo por lead", "cost per lead")
+    alc_col   = col(df, "alcance", "reach")
+
+    totais = {"gasto": 0.0, "cliques": 0, "impressoes": 0, "conv": 0.0,
+              "leads": 0, "alcance": 0, "campanhas": []}
+    camp_map: dict = {}
+
+    for _, row in df.iterrows():
+        row_d = row.to_dict()
+        if _is_total_row(row_d):
+            continue
+
+        gasto = num(row.get(gasto_col, 0))   if gasto_col else 0
+        cliq  = inteiro(row.get(cliq_col, 0)) if cliq_col else 0
+        impr  = inteiro(row.get(impr_col, 0)) if impr_col else 0
+        conv  = num(row.get(conv_col, 0))     if conv_col else 0
+        leads = inteiro(row.get(leads_col, 0)) if leads_col else 0
+        alc   = inteiro(row.get(alc_col, 0))  if alc_col else 0
+
+        # só conta linhas com alguma atividade
+        if gasto == 0 and cliq == 0 and impr == 0:
+            continue
+
+        totais["gasto"]      += gasto
+        totais["cliques"]    += cliq
+        totais["impressoes"] += impr
+        totais["conv"]       += conv
+        totais["leads"]      += leads
+        totais["alcance"]    += alc
+
+        if nome_col:
+            nome_c = str(row.get(nome_col, "")).strip()
+            if nome_c and nome_c.lower() not in ("nan", ""):
+                c = camp_map.setdefault(nome_c, {
+                    "nome": nome_c, "gasto": 0.0, "cliques": 0,
+                    "impressoes": 0, "leads": 0, "conv": 0.0,
+                })
+                c["gasto"]      += gasto
+                c["cliques"]    += cliq
+                c["impressoes"] += impr
+                c["leads"]      += leads
+                c["conv"]       += conv
+
+    # CTR ponderado
+    if totais["impressoes"] > 0 and totais["cliques"] > 0:
+        totais["ctr"] = f"{totais['cliques'] / totais['impressoes'] * 100:.2f}%"
+    else:
+        totais["ctr"] = "0%"
+
+    # CPL: prioriza leads (lead gen form); se não houver, usa conversões
+    base = totais["leads"] or totais["conv"]
+    if base > 0:
+        totais["cpl"] = round(totais["gasto"] / base, 2)
+    elif cpl_col:  # média dos custos por lead reportados
+        cpls = [num(row.get(cpl_col, 0)) for _, row in df.iterrows()]
+        cpls = [c for c in cpls if c > 0]
+        totais["cpl"] = round(sum(cpls) / len(cpls), 2) if cpls else 0
+    else:
+        totais["cpl"] = 0
+
+    totais["conv"] = int(round(float(totais["conv"])))
+    # campanhas ordenadas por gasto desc
+    camps = sorted(camp_map.values(), key=lambda x: x["gasto"], reverse=True)
+    for c in camps:
+        c["conv"] = int(round(float(c["conv"])))
+    totais["campanhas"] = camps
+    return totais
+
+
+def _merge_linkedin(acc: dict, novo: dict) -> dict:
+    """
+    Consolida vários exports do LinkedIn (conta, campanha, conjunto) sem duplicar
+    gasto: cada arquivo cobre a mesma conta, então pegamos o MAIOR valor de cada
+    métrica. Ex.: relatório da conta (todos os anúncios) + relatório de campanhas
+    do mesmo período → mesmo total, não a soma dos dois.
+    """
+    if not acc:
+        return dict(novo)
+    out = dict(acc)
+    for k in ("gasto", "cliques", "impressoes", "conv", "leads", "alcance"):
+        out[k] = max(acc.get(k, 0), novo.get(k, 0))
+    # lista de campanhas: mantém a mais rica (mais entradas / maior gasto)
+    novas = novo.get("campanhas", [])
+    if sum(c["gasto"] for c in novas) > sum(c["gasto"] for c in acc.get("campanhas", [])):
+        out["campanhas"] = novas
+    # recalcula CTR e CPL a partir dos totais consolidados
+    out["ctr"] = (f"{out['cliques'] / out['impressoes'] * 100:.2f}%"
+                  if out["impressoes"] and out["cliques"] else "0%")
+    base = out["leads"] or out["conv"]
+    out["cpl"] = round(out["gasto"] / base, 2) if base else (acc.get("cpl") or novo.get("cpl") or 0)
+    return out
+
+
 # ── Consolidação multi-nível (campanha + conjunto + anúncio) ────────────────
 
 def _meta_totais(meta_camp, meta_conj, meta_anun) -> dict:
@@ -503,15 +618,18 @@ def _merge_google(acc: dict, novo: dict, eh_campanha: bool) -> dict:
 
 def _analisar_performance(meta_camp, meta_conj, meta_anun,
                           google, periodo: str, cliente: str,
-                          responsavel: str = "Rafael") -> dict:
+                          responsavel: str = "Rafael",
+                          linkedin: dict = None) -> dict:
     """
     Lê os dados parseados e gera:
     - resumo_executivo: 2-3 frases sobre o período
     - insights_meta: lista de observações Meta
     - insights_google: lista de observações Google
+    - insights_linkedin: lista de observações LinkedIn
     - proximos_passos: lista de ações recomendadas
     - frase_resumo / frase_destaque: para a capa
     """
+    linkedin = linkedin or {}
     _mt = _meta_totais(meta_camp, meta_conj, meta_anun)
     meta_gasto  = _mt["gasto"]
     meta_leads  = _mt["leads"]
@@ -526,8 +644,17 @@ def _analisar_performance(meta_camp, meta_conj, meta_anun,
     g_cpl    = google.get("cpl", 0)
     g_ctr    = google.get("ctr", "0%")
 
-    total_inv   = meta_gasto + g_gasto
-    total_leads = meta_leads + g_conv
+    li_gasto = linkedin.get("gasto", 0)
+    li_cliq  = linkedin.get("cliques", 0)
+    li_impr  = linkedin.get("impressoes", 0)
+    li_leads = linkedin.get("leads", 0)
+    li_conv  = linkedin.get("conv", 0)
+    li_cpl   = linkedin.get("cpl", 0)
+    li_ctr   = linkedin.get("ctr", "0%")
+    li_result = li_leads or li_conv   # leads de formulário ou conversões
+
+    total_inv   = meta_gasto + g_gasto + li_gasto
+    total_leads = meta_leads + g_conv + li_result
 
     # ── Fase da campanha ────────────────────────────────────────────────────
     camp_ativas = [c for c in meta_camp if c.get("ativo", True)]
@@ -617,6 +744,31 @@ def _analisar_performance(meta_camp, meta_conj, meta_anun,
             f"R$ {top['gasto']:.2f} · {top['cliques']} cliques"
         )
 
+    # ── Insights LinkedIn ────────────────────────────────────────────────────
+    ins_linkedin = []
+    if li_cliq > 0 or li_impr > 0:
+        ins_linkedin.append(
+            f"R$ {li_gasto:.2f} investidos · {li_cliq} cliques · "
+            f"{li_impr:,} impressões · CTR {li_ctr}"
+        )
+    if li_result > 0:
+        rotulo = "leads" if li_leads else ("conversões" if li_conv > 1 else "conversão")
+        ins_linkedin.append(
+            f"{li_result} {rotulo} · CPL R$ {li_cpl:.2f} · público profissional (B2B)"
+        )
+    elif li_cliq > 0:
+        ins_linkedin.append(
+            "Fase de aprendizado do LinkedIn · sem leads registrados ainda "
+            "(campanha B2B costuma ter CPL mais alto e ciclo mais longo)"
+        )
+    camps_li = [c for c in linkedin.get("campanhas", []) if c["gasto"] > 0]
+    if camps_li:
+        top_li = max(camps_li, key=lambda x: x["gasto"])
+        ins_linkedin.append(
+            f"Campanha principal: '{top_li['nome'][:50]}' · "
+            f"R$ {top_li['gasto']:.2f} · {top_li['cliques']} cliques"
+        )
+
     # ── Próximos passos automáticos ─────────────────────────────────────────
     proximos = []
     if venc and venc.get("leads", 0) > 0:
@@ -643,12 +795,25 @@ def _analisar_performance(meta_camp, meta_conj, meta_anun,
             "responsavel": responsavel, "prazo": "7 dias",
             "impacto": f"CPL atual R$ {meta_cpl:.2f} · meta abaixo de R$ 60",
         })
+    if li_result == 0 and li_cliq > 0:
+        proximos.append({
+            "acao": "Revisar segmentação/formulário do LinkedIn (B2B)",
+            "responsavel": responsavel, "prazo": "7 dias",
+            "impacto": "Converter os cliques profissionais em leads qualificados",
+        })
+
+    # ── Plataformas com investimento (para a frase da capa) ─────────────────
+    plataformas = []
+    if meta_gasto > 0:  plataformas.append("Meta")
+    if g_gasto > 0:     plataformas.append("Google")
+    if li_gasto > 0:    plataformas.append("LinkedIn")
+    canais_str = " + ".join(plataformas) if plataformas else "Meta + Google"
 
     # ── Frases da capa ──────────────────────────────────────────────────────
     if total_leads > 0:
         cpl_g = round(total_inv / total_leads, 2)
         frase_r = f"{total_leads} leads gerados · R$ {total_inv:.2f} investidos"
-        frase_d = f"CPL médio R$ {cpl_g:.2f} · Meta + Google · {periodo}"
+        frase_d = f"CPL médio R$ {cpl_g:.2f} · {canais_str} · {periodo}"
     elif meta_pv > 0:
         frase_r = f"{meta_pv:,} visitas geradas · R$ {total_inv:.2f} investidos"
         frase_d = f"Fase de construção de audiência · {periodo}"
@@ -657,12 +822,13 @@ def _analisar_performance(meta_camp, meta_conj, meta_anun,
         frase_d = "Dados em processamento · próxima atualização em breve"
 
     return {
-        "insights_meta":    ins_meta,
-        "insights_google":  ins_google,
-        "proximos_passos":  proximos,
-        "frase_resumo":     frase_r,
-        "frase_destaque":   frase_d,
-        "fase":             fase,
+        "insights_meta":     ins_meta,
+        "insights_google":   ins_google,
+        "insights_linkedin": ins_linkedin,
+        "proximos_passos":   proximos,
+        "frase_resumo":      frase_r,
+        "frase_destaque":    frase_d,
+        "fase":              fase,
     }
 
 
@@ -1366,10 +1532,16 @@ def montar_dados(tipo, cliente, periodo, responsavel,
     google_raw       = {}
     google_kw_top    = []   # palavras-chave configuradas (bid keywords)
     google_termos_top = []  # termos reais digitados pelos usuários
+    linkedin_raw     = {}
 
     for nome_arq, df in dfs.items():
         tipo_csv = detectar_tipo_csv(df)
-        if tipo_csv == "meta_campanhas":
+        if tipo_csv == "linkedin":
+            novo_li = parse_linkedin(df)
+            # consolida vários exports do LinkedIn (conta + campanha + conjunto)
+            # sem duplicar gasto — pega o maior valor de cada métrica
+            linkedin_raw = _merge_linkedin(linkedin_raw, novo_li)
+        elif tipo_csv == "meta_campanhas":
             meta_camp_raw.extend(parse_meta_campanhas(df))
         elif tipo_csv == "meta_conjuntos":
             meta_conj_raw.extend(parse_meta_conjuntos(df))
@@ -1473,10 +1645,11 @@ def montar_dados(tipo, cliente, periodo, responsavel,
         analise = _analisar_performance(
             meta_camp_raw, meta_conj_raw, meta_anun_raw,
             google_raw, dados["periodo"], dados["cliente"],
-            dados["responsavel"]
+            dados["responsavel"], linkedin=linkedin_raw
         )
-        insights_meta   = analise["insights_meta"]
-        insights_google = analise["insights_google"]
+        insights_meta     = analise["insights_meta"]
+        insights_google   = analise["insights_google"]
+        insights_linkedin = analise["insights_linkedin"]
 
         # ── Texto livre: plano de ação → tabela de próximos passos ────────
         # itens do usuário entram primeiro; análise automática complementa.
@@ -1508,8 +1681,18 @@ def montar_dados(tipo, cliente, periodo, responsavel,
             "google_cpl":        g.get("cpl", 0),
             "google_kw_top":      google_kw_top,
             "google_termos_top":  google_termos_top,
+            "linkedin_gasto":      linkedin_raw.get("gasto", 0),
+            "linkedin_cliques":    linkedin_raw.get("cliques", 0),
+            "linkedin_impressoes": linkedin_raw.get("impressoes", 0),
+            "linkedin_ctr":        linkedin_raw.get("ctr", "0%"),
+            "linkedin_leads":      linkedin_raw.get("leads", 0),
+            "linkedin_conv":       linkedin_raw.get("conv", 0),
+            "linkedin_cpl":        linkedin_raw.get("cpl", 0),
+            "linkedin_alcance":    linkedin_raw.get("alcance", 0),
+            "linkedin_campanhas":  linkedin_raw.get("campanhas", []),
             "insights_criativos": insights_meta[:5],
             "insights_google":    insights_google,
+            "insights_linkedin":  insights_linkedin,
             "sugestoes_conteudo": [],
             "estrategia_seguidores": [],
             "proximos_passos": proximos,
@@ -1560,8 +1743,10 @@ def montar_dados(tipo, cliente, periodo, responsavel,
         meta_cpl   = _mt["cpl"]
         g_gasto    = google_raw.get("gasto", 0)
         g_leads    = google_raw.get("conv", 0)
-        total_inv  = meta_total + g_gasto
-        total_leads= meta_leads + g_leads
+        li_gasto   = linkedin_raw.get("gasto", 0)
+        li_leads   = linkedin_raw.get("leads", 0) or linkedin_raw.get("conv", 0)
+        total_inv  = meta_total + g_gasto + li_gasto
+        total_leads= meta_leads + g_leads + li_leads
         cpl_geral  = round(total_inv / total_leads, 2) if total_leads else 0
 
         canais = []
@@ -1572,6 +1757,10 @@ def montar_dados(tipo, cliente, periodo, responsavel,
         if g_gasto > 0:
             canais.append({"canal": "Google Ads", "gasto": g_gasto,
                            "leads": g_leads, "cpl": google_raw.get("cpl",0),
+                           "taxa_qual": "—", "avaliacao": "OK"})
+        if li_gasto > 0:
+            canais.append({"canal": "LinkedIn Ads", "gasto": li_gasto,
+                           "leads": li_leads, "cpl": linkedin_raw.get("cpl",0),
                            "taxa_qual": "—", "avaliacao": "OK"})
         dados.update({
             "investimento_total": total_inv,

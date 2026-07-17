@@ -117,6 +117,7 @@ WHITE       = colors.white
 GREEN       = colors.HexColor("#27AE60")
 RED         = colors.HexColor("#E74C3C")
 YELLOW      = colors.HexColor("#F39C12")
+LINKEDIN    = colors.HexColor("#0A66C2")   # azul institucional do LinkedIn
 
 # ── Tipografia ─────────────────────────────────────────────────────────────
 def style(name, font=None, size=10, color=None, align=TA_LEFT,

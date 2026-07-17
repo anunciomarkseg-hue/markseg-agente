@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from brand.design_system import (
     W, H, CW, CW_MM, MARGIN,
-    NAVY, ORANGE, BLUE, GREEN, RED, YELLOW, GRAY_BG, GRAY_LINE, GRAY_LIGHT, WHITE,
+    NAVY, ORANGE, BLUE, GREEN, RED, YELLOW, LINKEDIN, GRAY_BG, GRAY_LINE, GRAY_LIGHT, WHITE,
     S, PageHeader, SectionHeader, MetricCard, InsightBox, TagBadge,
     make_cards_row, table_style_default, table_total_row,
     chart_barras_horizontais, chart_donut, chart_barras_verticais_duplas,
@@ -87,7 +87,8 @@ def gerar(dados: dict, output_path: str):
     # total de páginas dinâmico: capa + Meta + Google/extras
     kw_top     = d.get("google_kw_top", [])
     termos_top = d.get("google_termos_top", [])
-    total_pags = 3 + (1 if (kw_top or termos_top) else 0)
+    tem_linkedin = d.get("linkedin_gasto", 0) > 0 or d.get("linkedin_impressoes", 0) > 0
+    total_pags = 3 + (1 if (kw_top or termos_top) else 0) + (1 if tem_linkedin else 0)
 
     doc = SimpleDocTemplate(
         output_path,
@@ -298,9 +299,13 @@ def gerar(dados: dict, output_path: str):
     ], n_cols=5))
     story.append(Spacer(1, 4 * mm))
 
-    # donut
+    # donut — inclui LinkedIn quando houver investimento
+    li_gasto = d.get("linkedin_gasto", 0)
+    donut_dados = [("Meta Ads", meta_total, ORANGE), ("Google Ads", g_gasto, NAVY)]
+    if li_gasto > 0:
+        donut_dados.append(("LinkedIn Ads", li_gasto, LINKEDIN))
     story.append(chart_donut(
-        [("Meta Ads", meta_total, ORANGE), ("Google Ads", g_gasto, NAVY)],
+        donut_dados,
         largura_mm=CW_MM, altura_mm=42,
         titulo="Distribuição do investimento total · semana",
     ))
@@ -310,9 +315,60 @@ def gerar(dados: dict, output_path: str):
         story.append(InsightBox("GOOGLE · ANÁLISE", d["insights_google"], cor=NAVY))
         story.append(Spacer(1, 4 * mm))
 
+    # ── seção 5 · LINKEDIN ADS (só aparece se houver CSV do LinkedIn) ─────
+    _sec_num = 5
+    if li_gasto > 0 or d.get("linkedin_impressoes", 0) > 0:
+        story.append(SectionHeader(_sec_num, "LINKEDIN ADS · B2B"))
+        story.append(Spacer(1, 4 * mm))
+
+        li_leads  = d.get("linkedin_leads", 0)
+        li_conv   = d.get("linkedin_conv", 0)
+        li_result = li_leads or li_conv
+        li_cpl    = d.get("linkedin_cpl", 0)
+        story.append(make_cards_row([
+            {"label": "INVESTIMENTO", "value": f"R$ {li_gasto:,.2f}".replace(",","."),
+             "sub": "7 dias",          "cor": LINKEDIN},
+            {"label": "CLIQUES",      "value": str(d.get("linkedin_cliques", 0)),
+             "sub": "total",           "cor": LINKEDIN},
+            {"label": "IMPRESSÕES",   "value": f"{d.get('linkedin_impressoes', 0):,}".replace(",","."),
+             "sub": "total",           "cor": LINKEDIN},
+            {"label": "CTR",          "value": d.get("linkedin_ctr", "0%"),
+             "sub": "taxa de clique",  "cor": GREEN},
+            {"label": "LEADS",        "value": str(li_result),
+             "sub": f"R$ {li_cpl:,.2f}/lead".replace(",","."), "cor": GREEN},
+        ], n_cols=5))
+        story.append(Spacer(1, 4 * mm))
+
+        # tabela por campanha (quando houver mais de uma)
+        li_camps = [c for c in d.get("linkedin_campanhas", []) if c.get("gasto", 0) > 0]
+        if len(li_camps) > 1:
+            # CAMPANHA(104) + GASTO(24) + CLIQUES(18) + LEADS(14) + IMP.(10) = 170
+            li_rows = [[
+                Paragraph("CAMPANHA", S["th"]), Paragraph("GASTO",   S["th"]),
+                Paragraph("CLIQUES",  S["th"]), Paragraph("LEADS",   S["th"]),
+                Paragraph("IMP.",     S["th"]),
+            ]]
+            for c in li_camps[:8]:
+                li_rows.append([
+                    Paragraph(c.get("nome", "")[:60], S["td"]),
+                    Paragraph(f"R$ {c.get('gasto', 0):,.2f}".replace(",","."), S["td_r"]),
+                    Paragraph(str(c.get("cliques", 0)), S["td_r"]),
+                    Paragraph(str(c.get("leads", 0) or c.get("conv", 0)), S["td_r"]),
+                    Paragraph(f"{c.get('impressoes', 0):,}".replace(",","."), S["td_r"]),
+                ])
+            li_t = Table(li_rows, colWidths=[104*mm, 24*mm, 18*mm, 14*mm, 10*mm],
+                         repeatRows=1)
+            li_t.setStyle(table_style_default())
+            story.append(li_t)
+            story.append(Spacer(1, 4 * mm))
+
+        if d.get("insights_linkedin"):
+            story.append(InsightBox("LINKEDIN · ANÁLISE", d["insights_linkedin"], cor=LINKEDIN))
+            story.append(Spacer(1, 4 * mm))
+        _sec_num += 1
+
     # PALAVRA/TERMO(110) + CLIQUES(20) + GASTO(26) + CONV.(14) = 170
     _kw_cols = [110*mm, 20*mm, 26*mm, 14*mm]
-    _sec_num = 5
 
     if kw_top:
         story.append(SectionHeader(_sec_num, "GOOGLE · TOP PALAVRAS-CHAVE POR GASTO"))

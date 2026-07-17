@@ -150,14 +150,19 @@ def _ler_csv(arq) -> pd.DataFrame:
     - Linhas de preâmbulo (Google Ads exporta 2 linhas de título antes do cabeçalho)
     """
     raw = arq.read()
-    for enc in ("utf-8-sig", "utf-8", "latin-1", "cp1252"):
-        try:
-            text = raw.decode(enc)
-            break
-        except UnicodeDecodeError:
-            continue
+    # LinkedIn Ads exporta em UTF-16 com BOM (\xff\xfe / \xfe\xff). Sem tratar
+    # isso, o decode cai em latin-1 e vira lixo com bytes nulos entre as letras.
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        text = raw.decode("utf-16")
     else:
-        text = raw.decode("latin-1", errors="replace")
+        for enc in ("utf-8-sig", "utf-8", "utf-16", "latin-1", "cp1252"):
+            try:
+                text = raw.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            text = raw.decode("latin-1", errors="replace")
 
     all_lines = text.split("\n")
     data_lines = [l for l in all_lines if l.strip()]
