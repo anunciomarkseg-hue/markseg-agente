@@ -334,7 +334,7 @@ def parse_google_keywords_top(df: pd.DataFrame, top_n: int = 5) -> list:
     """Retorna top N palavras-chave/termos por gasto, com cliques e conversões."""
     kw_col    = col(df, "palavra-chave", "termo de pesquisa", "keyword", "search term")
     gasto_col = col(df, "custo", "cost")
-    cliq_col  = col(df, "cliques", "clicks")
+    cliq_col  = col(df, "cliques", "clicks", "interações", "interacoes", "interactions")
     conv_col  = col(df, "conversões", "conversoes", "conversions")
     camp_col  = col(df, "campanha", "campaign")
 
@@ -366,9 +366,10 @@ def parse_google_campanhas(df: pd.DataFrame) -> dict:
     termos de pesquisa, anúncios). Pula linhas de totais e linhas sem dados.
     """
     gasto_col = col(df, "custo", "cost")
-    cliq_col  = col(df, "cliques", "clicks")
+    # relatórios novos do Google chamam cliques de "Interações"
+    cliq_col  = col(df, "cliques", "clicks", "interações", "interacoes", "interactions")
     impr_col  = col(df, "impr.", "impressões", "impressoes", "impressions")
-    ctr_col   = col(df, "ctr")
+    ctr_col   = col(df, "ctr", "taxa de interação", "taxa de interacao")
     conv_col  = col(df, "conversões", "conversoes", "conversions")
     cpl_col   = col(df, "custo / conv.", "custo / conv", "cost / conv",
                       "cpc méd.", "cpc médio", "avg. cpc")
