@@ -453,6 +453,16 @@ def parse_linkedin(df: pd.DataFrame) -> dict:
     leads_col = col(df, "leads")
     cpl_col   = col(df, "custo por lead", "cost per lead")
     alc_col   = col(df, "alcance", "reach")
+    adset_col = col(df, "código do conjunto de anúncios", "código do conjunto",
+                     "ad set id")
+
+    # O relatório de CONVERSÕES do LinkedIn não tem coluna de impressões e repete
+    # o "Total investido" do conjunto em cada linha (uma por tipo de conversão).
+    # Somar o gasto direto dobraria o valor — então, quando não há impressões,
+    # contamos o gasto de cada conjunto uma única vez (dedupe pelo código do
+    # conjunto). Conversões e leads continuam sendo somados normalmente.
+    eh_conversao = impr_col is None and gasto_col is not None
+    gastos_vistos: set = set()
 
     totais = {"gasto": 0.0, "cliques": 0, "impressoes": 0, "conv": 0.0,
               "leads": 0, "alcance": 0, "campanhas": []}
@@ -470,29 +480,39 @@ def parse_linkedin(df: pd.DataFrame) -> dict:
         leads = inteiro(row.get(leads_col, 0)) if leads_col else 0
         alc   = inteiro(row.get(alc_col, 0))  if alc_col else 0
 
-        # só conta linhas com alguma atividade
-        if gasto == 0 and cliq == 0 and impr == 0:
+        nome_c = str(row.get(nome_col, "")).strip() if nome_col else ""
+
+        # só conta linhas com alguma atividade (inclui conv/leads p/ relatório
+        # de conversões, onde impressões e cliques são sempre zero)
+        if gasto == 0 and cliq == 0 and impr == 0 and conv == 0 and leads == 0:
             continue
 
-        totais["gasto"]      += gasto
+        # dedupe do gasto no relatório de conversões (evita dupla contagem)
+        gasto_contab = gasto
+        if eh_conversao:
+            chave = str(row.get(adset_col, "")).strip() if adset_col else nome_c
+            if chave in gastos_vistos:
+                gasto_contab = 0
+            else:
+                gastos_vistos.add(chave)
+
+        totais["gasto"]      += gasto_contab
         totais["cliques"]    += cliq
         totais["impressoes"] += impr
         totais["conv"]       += conv
         totais["leads"]      += leads
         totais["alcance"]    += alc
 
-        if nome_col:
-            nome_c = str(row.get(nome_col, "")).strip()
-            if nome_c and nome_c.lower() not in ("nan", ""):
-                c = camp_map.setdefault(nome_c, {
-                    "nome": nome_c, "gasto": 0.0, "cliques": 0,
-                    "impressoes": 0, "leads": 0, "conv": 0.0,
-                })
-                c["gasto"]      += gasto
-                c["cliques"]    += cliq
-                c["impressoes"] += impr
-                c["leads"]      += leads
-                c["conv"]       += conv
+        if nome_c and nome_c.lower() not in ("nan", ""):
+            c = camp_map.setdefault(nome_c, {
+                "nome": nome_c, "gasto": 0.0, "cliques": 0,
+                "impressoes": 0, "leads": 0, "conv": 0.0,
+            })
+            c["gasto"]      += gasto_contab
+            c["cliques"]    += cliq
+            c["impressoes"] += impr
+            c["leads"]      += leads
+            c["conv"]       += conv
 
     # CTR ponderado
     if totais["impressoes"] > 0 and totais["cliques"] > 0:

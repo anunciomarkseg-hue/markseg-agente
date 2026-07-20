@@ -1,5 +1,5 @@
 """
-Template: Relatório Semanal de Performance (Meta Ads + Google Ads)
+Template: Relatório Semanal de Performance (Meta Ads + Google Ads + LinkedIn Ads)
 """
 
 from reportlab.platypus import SimpleDocTemplate, Spacer, Table, TableStyle, Paragraph, PageBreak
@@ -19,64 +19,9 @@ from brand.design_system import (
 
 def gerar(dados: dict, output_path: str):
     """
-    dados = {
-        "cliente":      str,
-        "periodo":      str,
-        "agencia":      str,
-        "responsavel":  str,
-
-        # Meta Ads - campanhas (lista de dicts)
-        "meta_campanhas": [
-            {"etapa": "TOPO|MEIO|FUNDO", "nome": str, "verba": float,
-             "resultado": str, "cpr": float, "impressoes": int}
-        ],
-        "meta_total":    float,
-        "meta_leads":    int,
-        "meta_cpl":      float,
-
-        # Criativos (lista de dicts)
-        "criativos": [
-            {"nome": str, "status": "Ativo|Inativo", "gasto": float,
-             "leads": int, "cpl": float, "hook": str, "hold": str,
-             "avaliacao": str, "destaque": bool}
-        ],
-
-        # Conjuntos de anúncios (lista de dicts)
-        "conjuntos": [
-            {"nome": str, "status": str, "orcamento": float,
-             "gasto": float, "leads": int, "cpl": float, "alcance": int}
-        ],
-
-        # Google Ads
-        "google_gasto":      float,
-        "google_cliques":    int,
-        "google_impressoes": int,
-        "google_ctr":        str,
-        "google_conv":       int,
-        "google_cpl":        float,
-
-        # Insights (listas de strings)
-        "insights_criativos": [str, ...],
-        "insights_google":    [str, ...],
-
-        # Próximos passos
-        "proximos_passos": [
-            {"acao": str, "responsavel": str, "prazo": str, "impacto": str}
-        ],
-
-        # Conteúdo orgânico
-        "sugestoes_conteudo": [str, ...],
-
-        # Estratégia seguidores
-        "estrategia_seguidores": [
-            {"iniciativa": str, "acao": str, "prioridade": str}
-        ],
-
-        # Resumo da capa
-        "frase_resumo":    str,
-        "frase_destaque":  str,
-        "info_capa":       str,
-    }
+    Relatório de performance multi-plataforma. Cada plataforma (Meta, Google,
+    LinkedIn) só entra no PDF quando há dados dela — clientes que não rodam uma
+    das plataformas não recebem seção zerada.
     """
     d = dados
     cliente     = d.get("cliente", "Cliente")
@@ -84,11 +29,24 @@ def gerar(dados: dict, output_path: str):
     agencia     = d.get("agencia", "MarkSeg Trafego")
     responsavel = d.get("responsavel", "Rafael")
 
-    # total de páginas dinâmico: capa + Meta + Google/extras
+    # ── Quais plataformas têm dados? ──────────────────────────────────────
+    meta_total = d.get("meta_total", 0)
+    g_gasto    = d.get("google_gasto", 0)
+    li_gasto   = d.get("linkedin_gasto", 0)
+
+    tem_meta = (meta_total > 0 or d.get("meta_leads", 0) > 0 or
+                any(c.get("verba", 0) > 0 or c.get("impressoes", 0) > 0
+                    for c in d.get("meta_campanhas", [])))
+    tem_google = (g_gasto > 0 or d.get("google_cliques", 0) > 0 or
+                  d.get("google_impressoes", 0) > 0)
+    tem_linkedin = (li_gasto > 0 or d.get("linkedin_impressoes", 0) > 0)
+
     kw_top     = d.get("google_kw_top", [])
     termos_top = d.get("google_termos_top", [])
-    tem_linkedin = d.get("linkedin_gasto", 0) > 0 or d.get("linkedin_impressoes", 0) > 0
-    total_pags = 3 + (1 if (kw_top or termos_top) else 0) + (1 if tem_linkedin else 0)
+
+    # total de páginas dinâmico: capa + uma por plataforma com dados + extras
+    n_plats = sum([tem_meta, tem_google, tem_linkedin])
+    total_pags = 1 + max(n_plats, 1) + (1 if (kw_top or termos_top) else 0)
 
     doc = SimpleDocTemplate(
         output_path,
@@ -99,226 +57,235 @@ def gerar(dados: dict, output_path: str):
 
     story = [PageBreak()]   # página 1 = capa, story começa na pág. 2
 
-    # largura útil: CW = W - 2*MARGIN = 170 mm  ← todas as tabelas respeitam isso
-    # ── PÁG 2 · META ADS ──────────────────────────────────────────────────
+    # ── Numeração dinâmica de seções ──────────────────────────────────────
+    _SEC = [0]
+    def _sh(titulo):
+        _SEC[0] += 1
+        return SectionHeader(_SEC[0], titulo)
+
+    # ── Cabeçalho de topo de cada plataforma ─────────────────────────────
+    # A 1ª plataforma renderizada usa o cabeçalho inicial; as seguintes ganham
+    # um novo cabeçalho (efeito de página nova por plataforma).
+    _plats = [0]
+    def _plat_header():
+        if _plats[0] > 0:
+            story.append(Spacer(1, 6 * mm))
+            story.append(PageHeader(cliente, f"Semana · {periodo}", ""))
+            story.append(Spacer(1, 4 * mm))
+        _plats[0] += 1
+
+    # cabeçalho inicial (sempre presente)
     story.append(PageHeader(cliente, f"Semana · {periodo}", ""))
     story.append(Spacer(1, 4 * mm))
-
-    # seção 1 – visão geral meta
-    story.append(SectionHeader(1, "META ADS · VISÃO GERAL DA SEMANA"))
-    story.append(Spacer(1, 4 * mm))
-
-    meta_total  = d.get("meta_total", 0)
-    meta_leads  = d.get("meta_leads", 0)
-    meta_cpl    = d.get("meta_cpl", 0)
-    # CPL vencedor: melhor CPL entre criativos com pelo menos 1 lead
-    meta_melhor = min(
-        (c["cpl"] for c in d.get("criativos", []) if c.get("leads", 0) >= 1),
-        default=meta_cpl
-    )
-
-    story.append(make_cards_row([
-        {"label": "INVESTIMENTO META", "value": f"R$ {meta_total:,.2f}".replace(",","."),
-         "sub": "total 7 dias",        "cor": ORANGE},
-        {"label": "LEADS GERADOS",     "value": str(meta_leads),
-         "sub": "campanha fundo",      "cor": ORANGE},
-        {"label": "CPL MÉDIO",         "value": f"R$ {meta_cpl:,.2f}".replace(",","."),
-         "sub": "custo por lead",      "cor": ORANGE},
-        {"label": "CPL VENCEDOR",      "value": f"R$ {meta_melhor:,.2f}".replace(",","."),
-         "sub": "melhor criativo",     "cor": GREEN},
-    ]))
-    story.append(Spacer(1, 5 * mm))
-
-    # tabela funil — apenas campanhas com atividade no período
-    story.append(Paragraph("Distribuição por etapa do funil", S["body_bold"]))
-    story.append(Spacer(1, 2 * mm))
 
     etapa_cores = {"TOPO": NAVY, "MEIO": BLUE, "FUNDO": ORANGE}
-    campanhas_ativas = [
-        c for c in d.get("meta_campanhas", [])
-        if c.get("verba", 0) > 0 or c.get("impressoes", 0) > 0
-    ]
-    funil_rows = [[
-        Paragraph("ETAPA",     S["th"]), Paragraph("CAMPANHA",   S["th"]),
-        Paragraph("VERBA",     S["th"]), Paragraph("RESULTADO",  S["th"]),
-        Paragraph("CPR",       S["th"]), Paragraph("IMP.",       S["th"]),
-    ]]
-    for camp in campanhas_ativas:
-        etapa_cor = etapa_cores.get(camp.get("etapa", "FUNDO").upper(), NAVY)
-        funil_rows.append([
-            TagBadge(camp.get("etapa", ""), etapa_cor, largura=20*mm),
-            Paragraph(camp.get("nome", ""), S["td"]),
-            Paragraph(f"R$ {camp.get('verba', 0):,.2f}".replace(",","."), S["td_r"]),
-            Paragraph(camp.get("resultado", ""), S["td"]),
-            Paragraph(f"R$ {camp.get('cpr', 0):,.2f}".replace(",","."), S["td_r"]),
-            Paragraph(f"{camp.get('impressoes', 0):,}".replace(",","."), S["td_r"]),
-        ])
 
-    total_imp = sum(c.get("impressoes", 0) for c in campanhas_ativas)
-    funil_rows.append([
-        Paragraph("TOTAL", S["th"]), Paragraph("", S["th"]),
-        Paragraph(f"R$ {meta_total:,.2f}".replace(",","."), S["th"]),
-        Paragraph(f"{meta_leads} leads", S["th"]),
-        Paragraph(f"R$ {meta_cpl:,.2f}".replace(",","."), S["th"]),
-        Paragraph(f"{total_imp:,}".replace(",","."), S["th"]),
-    ])
+    # ══════════════════════════════════════════════════════════════════════
+    # META ADS
+    # ══════════════════════════════════════════════════════════════════════
+    if tem_meta:
+        _plat_header()
 
-    # ETAPA(22) + CAMPANHA(58) + VERBA(22) + RESULTADO(30) + CPR(22) + IMP.(16) = 170
-    funil_cols = [22*mm, 58*mm, 22*mm, 30*mm, 22*mm, 16*mm]
-    ft = Table(funil_rows, colWidths=funil_cols, repeatRows=1)
-    ft.setStyle(table_style_default())
-    ft.setStyle(table_total_row(len(funil_rows) - 1))
-    story.append(ft)
-    story.append(Spacer(1, 4 * mm))
+        meta_leads  = d.get("meta_leads", 0)
+        meta_cpl    = d.get("meta_cpl", 0)
+        # CPL vencedor: melhor CPL entre criativos com pelo menos 1 lead
+        meta_melhor = min(
+            (c["cpl"] for c in d.get("criativos", []) if c.get("leads", 0) >= 1),
+            default=meta_cpl
+        )
 
-    # gráfico funil — apenas campanhas com verba
-    graf_funil_dados = [
-        (c.get("etapa","") + " · " + c.get("nome","")[:22],
-         c.get("verba", 0),
-         etapa_cores.get(c.get("etapa","FUNDO").upper(), NAVY))
-        for c in campanhas_ativas if c.get("verba", 0) > 0
-    ]
-    if graf_funil_dados:
-        story.append(chart_barras_horizontais(
-            graf_funil_dados,
-            largura_mm=CW_MM, altura_mm=max(30, len(graf_funil_dados) * 10),
-            titulo="Investimento por etapa do funil",
-        ))
+        story.append(_sh("META ADS · VISÃO GERAL DA SEMANA"))
+        story.append(Spacer(1, 4 * mm))
+        story.append(make_cards_row([
+            {"label": "INVESTIMENTO META", "value": f"R$ {meta_total:,.2f}".replace(",","."),
+             "sub": "total 7 dias",        "cor": ORANGE},
+            {"label": "LEADS GERADOS",     "value": str(meta_leads),
+             "sub": "campanha fundo",      "cor": ORANGE},
+            {"label": "CPL MÉDIO",         "value": f"R$ {meta_cpl:,.2f}".replace(",","."),
+             "sub": "custo por lead",      "cor": ORANGE},
+            {"label": "CPL VENCEDOR",      "value": f"R$ {meta_melhor:,.2f}".replace(",","."),
+             "sub": "melhor criativo",     "cor": GREEN},
+        ]))
         story.append(Spacer(1, 5 * mm))
 
-    # seção 2 – criativos (top 5, já filtrados com gasto > 0)
-    story.append(SectionHeader(2, "ANÁLISE DE CRIATIVOS · TOP 5"))
-    story.append(Spacer(1, 4 * mm))
+        # tabela funil — apenas campanhas com atividade no período
+        story.append(Paragraph("Distribuição por etapa do funil", S["body_bold"]))
+        story.append(Spacer(1, 2 * mm))
 
-    # CRIATIVO(52) + STATUS(18) + GASTO(20) + LEADS(15) + CPL(20) + HOOK(18) + AVAL(27) = 170
-    cri_rows = [[
-        Paragraph("CRIATIVO",  S["th"]), Paragraph("STATUS",    S["th"]),
-        Paragraph("GASTO",     S["th"]), Paragraph("LEADS",     S["th"]),
-        Paragraph("CPL",       S["th"]), Paragraph("HOOK RATE", S["th"]),
-        Paragraph("AVALIAÇÃO", S["th"]),
-    ]]
-    for cri in d.get("criativos", []):
-        ativo = cri.get("status", "") == "Ativo"
-        dest  = cri.get("destaque", False)
-        tem_lead = cri.get("leads", 0) >= 1
-        cri_rows.append([
-            Paragraph(cri.get("nome", ""), S["td_bold"] if dest else S["td"]),
-            Paragraph(cri.get("status", ""),
-                      S["td_green"] if ativo else S["td_red"]),
-            Paragraph(f"R$ {cri.get('gasto', 0):,.2f}".replace(",","."), S["td_r"]),
-            Paragraph(str(cri.get("leads", 0)),
-                      S["td_green"] if tem_lead else S["td"]),
-            Paragraph(f"R$ {cri.get('cpl', 0):,.2f}".replace(",","."),
-                      S["td_green"] if tem_lead else S["td"]),
-            Paragraph(cri.get("hook", "—"), S["td_r"]),
-            Paragraph(cri.get("avaliacao", ""),
-                      S["td_orange"] if dest else S["td"]),
-        ])
-
-    cri_cols = [52*mm, 18*mm, 20*mm, 15*mm, 20*mm, 18*mm, 27*mm]
-    ct = Table(cri_rows, colWidths=cri_cols, repeatRows=1)
-    ct.setStyle(table_style_default())
-    story.append(ct)
-    story.append(Spacer(1, 4 * mm))
-
-    # gráfico criativos com lead
-    cri_graf_dados = [
-        (c.get("nome", "")[:18], c.get("leads", 0), f"R${c.get('cpl',0):.2f}")
-        for c in d.get("criativos", []) if c.get("leads", 0) > 0
-    ]
-    if cri_graf_dados:
-        story.append(chart_barras_verticais_duplas(
-            cri_graf_dados, CW_MM, 50,
-            label1="Leads", label2="CPL",
-            titulo="Comparativo de criativos · leads x CPL",
-        ))
-        story.append(Spacer(1, 4 * mm))
-
-    if d.get("insights_criativos"):
-        story.append(InsightBox("INSIGHT · CRIATIVO VENCEDOR", d["insights_criativos"]))
-        story.append(Spacer(1, 5 * mm))
-
-    # seção 3 – conjuntos (apenas com atividade)
-    conjuntos_ativos = [
-        c for c in d.get("conjuntos", [])
-        if c.get("gasto", 0) > 0 or c.get("leads", 0) > 0
-    ]
-    if conjuntos_ativos:
-        story.append(SectionHeader(3, "CONJUNTOS DE ANÚNCIOS · FUNDO"))
-        story.append(Spacer(1, 4 * mm))
-
-        # CONJUNTO(62) + STATUS(18) + ORC/DIA(20) + GASTO(20) + LEADS(14) + CPL(20) + ALCANCE(16) = 170
-        conj_rows = [[
-            Paragraph("CONJUNTO",  S["th"]), Paragraph("STATUS",  S["th"]),
-            Paragraph("ORC./DIA",  S["th"]), Paragraph("GASTO",   S["th"]),
-            Paragraph("LEADS",     S["th"]), Paragraph("CPL",     S["th"]),
-            Paragraph("ALCANCE",   S["th"]),
+        campanhas_ativas = [
+            c for c in d.get("meta_campanhas", [])
+            if c.get("verba", 0) > 0 or c.get("impressoes", 0) > 0
+        ]
+        funil_rows = [[
+            Paragraph("ETAPA",     S["th"]), Paragraph("CAMPANHA",   S["th"]),
+            Paragraph("VERBA",     S["th"]), Paragraph("RESULTADO",  S["th"]),
+            Paragraph("CPR",       S["th"]), Paragraph("IMP.",       S["th"]),
         ]]
-        for conj in conjuntos_ativos:
-            ativo = conj.get("status", "") == "Ativo"
-            cpl   = conj.get("cpl", 0)
-            conj_rows.append([
-                Paragraph(conj.get("nome", ""), S["td_bold"]),
-                Paragraph(conj.get("status", ""),
-                          S["td_green"] if ativo else S["td_red"]),
-                Paragraph(f"R$ {conj.get('orcamento',0):,.2f}".replace(",","."), S["td_r"]),
-                Paragraph(f"R$ {conj.get('gasto',0):,.2f}".replace(",","."), S["td_r"]),
-                Paragraph(str(conj.get("leads", 0)), S["td"]),
-                Paragraph(f"R$ {cpl:,.2f}".replace(",","."),
-                          S["td_green"] if (cpl > 0 and cpl < 80) else
-                          (S["td_red"] if cpl >= 80 else S["td"])),
-                Paragraph(f"{conj.get('alcance',0):,}".replace(",","."), S["td_r"]),
+        for camp in campanhas_ativas:
+            etapa_cor = etapa_cores.get(camp.get("etapa", "FUNDO").upper(), NAVY)
+            funil_rows.append([
+                TagBadge(camp.get("etapa", ""), etapa_cor, largura=20*mm),
+                Paragraph(camp.get("nome", ""), S["td"]),
+                Paragraph(f"R$ {camp.get('verba', 0):,.2f}".replace(",","."), S["td_r"]),
+                Paragraph(camp.get("resultado", ""), S["td"]),
+                Paragraph(f"R$ {camp.get('cpr', 0):,.2f}".replace(",","."), S["td_r"]),
+                Paragraph(f"{camp.get('impressoes', 0):,}".replace(",","."), S["td_r"]),
             ])
 
-        conj_cols = [62*mm, 18*mm, 20*mm, 20*mm, 14*mm, 20*mm, 16*mm]
-        conj_t = Table(conj_rows, colWidths=conj_cols, repeatRows=1)
-        conj_t.setStyle(table_style_default())
-        story.append(conj_t)
+        total_imp = sum(c.get("impressoes", 0) for c in campanhas_ativas)
+        funil_rows.append([
+            Paragraph("TOTAL", S["th"]), Paragraph("", S["th"]),
+            Paragraph(f"R$ {meta_total:,.2f}".replace(",","."), S["th"]),
+            Paragraph(f"{meta_leads} leads", S["th"]),
+            Paragraph(f"R$ {meta_cpl:,.2f}".replace(",","."), S["th"]),
+            Paragraph(f"{total_imp:,}".replace(",","."), S["th"]),
+        ])
 
-    # ── PÁG 3 · GOOGLE ───────────────────────────────────────────────────
-    story.append(Spacer(1, 6 * mm))
-    story.append(PageHeader(cliente, f"Semana · {periodo}", ""))
-    story.append(Spacer(1, 4 * mm))
-
-    # seção 4 – google
-    story.append(SectionHeader(4, "GOOGLE ADS · SEARCH"))
-    story.append(Spacer(1, 4 * mm))
-
-    g_gasto = d.get("google_gasto", 0)
-    story.append(make_cards_row([
-        {"label": "INVESTIMENTO",  "value": f"R$ {g_gasto:,.2f}".replace(",","."),
-         "sub": "7 dias",          "cor": ORANGE},
-        {"label": "CLIQUES",       "value": str(d.get("google_cliques", 0)),
-         "sub": "total search",    "cor": ORANGE},
-        {"label": "IMPRESSÕES",    "value": f"{d.get('google_impressoes', 0):,}".replace(",","."),
-         "sub": "total search",    "cor": ORANGE},
-        {"label": "CTR",           "value": d.get("google_ctr", "0%"),
-         "sub": "taxa de clique",  "cor": GREEN},
-        {"label": "CONVERSÕES",    "value": str(d.get("google_conv", 0)),
-         "sub": f"R$ {d.get('google_cpl',0):,.2f}/conv".replace(",","."), "cor": GREEN},
-    ], n_cols=5))
-    story.append(Spacer(1, 4 * mm))
-
-    # donut — inclui LinkedIn quando houver investimento
-    li_gasto = d.get("linkedin_gasto", 0)
-    donut_dados = [("Meta Ads", meta_total, ORANGE), ("Google Ads", g_gasto, NAVY)]
-    if li_gasto > 0:
-        donut_dados.append(("LinkedIn Ads", li_gasto, LINKEDIN))
-    story.append(chart_donut(
-        donut_dados,
-        largura_mm=CW_MM, altura_mm=42,
-        titulo="Distribuição do investimento total · semana",
-    ))
-    story.append(Spacer(1, 4 * mm))
-
-    if d.get("insights_google"):
-        story.append(InsightBox("GOOGLE · ANÁLISE", d["insights_google"], cor=NAVY))
+        # ETAPA(22) + CAMPANHA(58) + VERBA(22) + RESULTADO(30) + CPR(22) + IMP.(16) = 170
+        funil_cols = [22*mm, 58*mm, 22*mm, 30*mm, 22*mm, 16*mm]
+        ft = Table(funil_rows, colWidths=funil_cols, repeatRows=1)
+        ft.setStyle(table_style_default())
+        ft.setStyle(table_total_row(len(funil_rows) - 1))
+        story.append(ft)
         story.append(Spacer(1, 4 * mm))
 
-    # ── seção 5 · LINKEDIN ADS (só aparece se houver CSV do LinkedIn) ─────
-    _sec_num = 5
-    if li_gasto > 0 or d.get("linkedin_impressoes", 0) > 0:
-        story.append(SectionHeader(_sec_num, "LINKEDIN ADS · B2B"))
+        # gráfico funil — apenas campanhas com verba
+        graf_funil_dados = [
+            (c.get("etapa","") + " · " + c.get("nome","")[:22],
+             c.get("verba", 0),
+             etapa_cores.get(c.get("etapa","FUNDO").upper(), NAVY))
+            for c in campanhas_ativas if c.get("verba", 0) > 0
+        ]
+        if graf_funil_dados:
+            story.append(chart_barras_horizontais(
+                graf_funil_dados,
+                largura_mm=CW_MM, altura_mm=max(30, len(graf_funil_dados) * 10),
+                titulo="Investimento por etapa do funil",
+            ))
+            story.append(Spacer(1, 5 * mm))
+
+        # seção – criativos (top 5, já filtrados com gasto > 0)
+        story.append(_sh("ANÁLISE DE CRIATIVOS · TOP 5"))
+        story.append(Spacer(1, 4 * mm))
+
+        # CRIATIVO(52) + STATUS(18) + GASTO(20) + LEADS(15) + CPL(20) + HOOK(18) + AVAL(27) = 170
+        cri_rows = [[
+            Paragraph("CRIATIVO",  S["th"]), Paragraph("STATUS",    S["th"]),
+            Paragraph("GASTO",     S["th"]), Paragraph("LEADS",     S["th"]),
+            Paragraph("CPL",       S["th"]), Paragraph("HOOK RATE", S["th"]),
+            Paragraph("AVALIAÇÃO", S["th"]),
+        ]]
+        for cri in d.get("criativos", []):
+            ativo = cri.get("status", "") == "Ativo"
+            dest  = cri.get("destaque", False)
+            tem_lead = cri.get("leads", 0) >= 1
+            cri_rows.append([
+                Paragraph(cri.get("nome", ""), S["td_bold"] if dest else S["td"]),
+                Paragraph(cri.get("status", ""),
+                          S["td_green"] if ativo else S["td_red"]),
+                Paragraph(f"R$ {cri.get('gasto', 0):,.2f}".replace(",","."), S["td_r"]),
+                Paragraph(str(cri.get("leads", 0)),
+                          S["td_green"] if tem_lead else S["td"]),
+                Paragraph(f"R$ {cri.get('cpl', 0):,.2f}".replace(",","."),
+                          S["td_green"] if tem_lead else S["td"]),
+                Paragraph(cri.get("hook", "—"), S["td_r"]),
+                Paragraph(cri.get("avaliacao", ""),
+                          S["td_orange"] if dest else S["td"]),
+            ])
+
+        cri_cols = [52*mm, 18*mm, 20*mm, 15*mm, 20*mm, 18*mm, 27*mm]
+        ct = Table(cri_rows, colWidths=cri_cols, repeatRows=1)
+        ct.setStyle(table_style_default())
+        story.append(ct)
+        story.append(Spacer(1, 4 * mm))
+
+        # gráfico criativos com lead
+        cri_graf_dados = [
+            (c.get("nome", "")[:18], c.get("leads", 0), f"R${c.get('cpl',0):.2f}")
+            for c in d.get("criativos", []) if c.get("leads", 0) > 0
+        ]
+        if cri_graf_dados:
+            story.append(chart_barras_verticais_duplas(
+                cri_graf_dados, CW_MM, 50,
+                label1="Leads", label2="CPL",
+                titulo="Comparativo de criativos · leads x CPL",
+            ))
+            story.append(Spacer(1, 4 * mm))
+
+        if d.get("insights_criativos"):
+            story.append(InsightBox("INSIGHT · CRIATIVO VENCEDOR", d["insights_criativos"]))
+            story.append(Spacer(1, 5 * mm))
+
+        # seção – conjuntos (apenas com atividade)
+        conjuntos_ativos = [
+            c for c in d.get("conjuntos", [])
+            if c.get("gasto", 0) > 0 or c.get("leads", 0) > 0
+        ]
+        if conjuntos_ativos:
+            story.append(_sh("CONJUNTOS DE ANÚNCIOS · FUNDO"))
+            story.append(Spacer(1, 4 * mm))
+
+            # CONJUNTO(62) + STATUS(18) + ORC/DIA(20) + GASTO(20) + LEADS(14) + CPL(20) + ALCANCE(16) = 170
+            conj_rows = [[
+                Paragraph("CONJUNTO",  S["th"]), Paragraph("STATUS",  S["th"]),
+                Paragraph("ORC./DIA",  S["th"]), Paragraph("GASTO",   S["th"]),
+                Paragraph("LEADS",     S["th"]), Paragraph("CPL",     S["th"]),
+                Paragraph("ALCANCE",   S["th"]),
+            ]]
+            for conj in conjuntos_ativos:
+                ativo = conj.get("status", "") == "Ativo"
+                cpl   = conj.get("cpl", 0)
+                conj_rows.append([
+                    Paragraph(conj.get("nome", ""), S["td_bold"]),
+                    Paragraph(conj.get("status", ""),
+                              S["td_green"] if ativo else S["td_red"]),
+                    Paragraph(f"R$ {conj.get('orcamento',0):,.2f}".replace(",","."), S["td_r"]),
+                    Paragraph(f"R$ {conj.get('gasto',0):,.2f}".replace(",","."), S["td_r"]),
+                    Paragraph(str(conj.get("leads", 0)), S["td"]),
+                    Paragraph(f"R$ {cpl:,.2f}".replace(",","."),
+                              S["td_green"] if (cpl > 0 and cpl < 80) else
+                              (S["td_red"] if cpl >= 80 else S["td"])),
+                    Paragraph(f"{conj.get('alcance',0):,}".replace(",","."), S["td_r"]),
+                ])
+
+            conj_cols = [62*mm, 18*mm, 20*mm, 20*mm, 14*mm, 20*mm, 16*mm]
+            conj_t = Table(conj_rows, colWidths=conj_cols, repeatRows=1)
+            conj_t.setStyle(table_style_default())
+            story.append(conj_t)
+
+    # ══════════════════════════════════════════════════════════════════════
+    # GOOGLE ADS
+    # ══════════════════════════════════════════════════════════════════════
+    if tem_google:
+        _plat_header()
+
+        story.append(_sh("GOOGLE ADS · SEARCH"))
+        story.append(Spacer(1, 4 * mm))
+        story.append(make_cards_row([
+            {"label": "INVESTIMENTO",  "value": f"R$ {g_gasto:,.2f}".replace(",","."),
+             "sub": "7 dias",          "cor": ORANGE},
+            {"label": "CLIQUES",       "value": str(d.get("google_cliques", 0)),
+             "sub": "total search",    "cor": ORANGE},
+            {"label": "IMPRESSÕES",    "value": f"{d.get('google_impressoes', 0):,}".replace(",","."),
+             "sub": "total search",    "cor": ORANGE},
+            {"label": "CTR",           "value": d.get("google_ctr", "0%"),
+             "sub": "taxa de clique",  "cor": GREEN},
+            {"label": "CONVERSÕES",    "value": str(d.get("google_conv", 0)),
+             "sub": f"R$ {d.get('google_cpl',0):,.2f}/conv".replace(",","."), "cor": GREEN},
+        ], n_cols=5))
+        story.append(Spacer(1, 4 * mm))
+
+        if d.get("insights_google"):
+            story.append(InsightBox("GOOGLE · ANÁLISE", d["insights_google"], cor=NAVY))
+            story.append(Spacer(1, 4 * mm))
+
+    # ══════════════════════════════════════════════════════════════════════
+    # LINKEDIN ADS
+    # ══════════════════════════════════════════════════════════════════════
+    if tem_linkedin:
+        _plat_header()
+
+        story.append(_sh("LINKEDIN ADS · B2B"))
         story.append(Spacer(1, 4 * mm))
 
         li_leads  = d.get("linkedin_leads", 0)
@@ -365,7 +332,28 @@ def gerar(dados: dict, output_path: str):
         if d.get("insights_linkedin"):
             story.append(InsightBox("LINKEDIN · ANÁLISE", d["insights_linkedin"], cor=LINKEDIN))
             story.append(Spacer(1, 4 * mm))
-        _sec_num += 1
+
+    # ══════════════════════════════════════════════════════════════════════
+    # DISTRIBUIÇÃO DO INVESTIMENTO (só com 2+ plataformas com verba)
+    # ══════════════════════════════════════════════════════════════════════
+    donut_dados = [
+        (n, v, c) for (n, v, c) in [
+            ("Meta Ads",     meta_total, ORANGE),
+            ("Google Ads",   g_gasto,    NAVY),
+            ("LinkedIn Ads", li_gasto,   LINKEDIN),
+        ] if v > 0
+    ]
+    if len(donut_dados) >= 2:
+        story.append(Spacer(1, 2 * mm))
+        story.append(chart_donut(
+            donut_dados,
+            largura_mm=CW_MM, altura_mm=42,
+            titulo="Distribuição do investimento total · semana",
+        ))
+        story.append(Spacer(1, 4 * mm))
+
+    # próximas seções continuam a numeração das plataformas
+    _sec_num = _SEC[0] + 1
 
     # PALAVRA/TERMO(110) + CLIQUES(20) + GASTO(26) + CONV.(14) = 170
     _kw_cols = [110*mm, 20*mm, 26*mm, 14*mm]
